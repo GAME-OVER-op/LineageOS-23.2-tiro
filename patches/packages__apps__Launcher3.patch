@@ -1,0 +1,309 @@
+diff --git a/quickstep/res/layout/overview_actions_container.xml b/quickstep/res/layout/overview_actions_container.xml
+index ce54028256..a7d1d81232 100644
+--- a/quickstep/res/layout/overview_actions_container.xml
++++ b/quickstep/res/layout/overview_actions_container.xml
+@@ -45,6 +45,28 @@
+             android:text="@string/action_split"
+             android:visibility="gone" />
+ 
++        <Button
++            android:id="@+id/action_clear_all"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginStart="@dimen/overview_actions_button_spacing"
++            android:drawableStart="@drawable/ic_overview_clear_all"
++            android:text="@string/recents_clear_all" />
++
++        <ImageButton
++            android:id="@+id/action_freeform"
++            style="?attr/overviewActionButtonStyle"
++            android:layout_width="48dp"
++            android:layout_height="48dp"
++            android:layout_marginStart="@dimen/overview_actions_button_spacing"
++            android:contentDescription="@string/recent_task_option_freeform"
++            android:minWidth="0dp"
++            android:minHeight="0dp"
++            android:padding="0dp"
++            android:scaleType="center"
++            android:src="@drawable/ic_overview_freeform"
++            android:tint="?android:attr/textColorPrimary" />
++
+     </LinearLayout>
+ 
+     <!-- Currently, the only "group action button" is this save app pair button. If more are added,
+@@ -57,4 +79,4 @@
+         android:layout_gravity="bottom|center_horizontal"
+         android:visibility="gone" />
+ 
+-</com.android.quickstep.views.OverviewActionsView>
+\ No newline at end of file
++</com.android.quickstep.views.OverviewActionsView>
+diff --git a/quickstep/src/com/android/quickstep/TaskOverlayFactory.java b/quickstep/src/com/android/quickstep/TaskOverlayFactory.java
+index e0586c5de3..6135a1eb5f 100644
+--- a/quickstep/src/com/android/quickstep/TaskOverlayFactory.java
++++ b/quickstep/src/com/android/quickstep/TaskOverlayFactory.java
+@@ -22,6 +22,8 @@ import static com.android.quickstep.views.OverviewActionsView.DISABLED_ROTATED;
+ import static com.android.quickstep.views.RecentsViewContainer.containerFromContext;
+ 
+ import android.annotation.SuppressLint;
++import android.app.FreeformLauncher;
++import android.content.ComponentName;
+ import android.content.Context;
+ import android.graphics.Bitmap;
+ import android.graphics.Insets;
+@@ -270,6 +272,30 @@ public class TaskOverlayFactory {
+                     .saveAppPair(taskView);
+         }
+ 
++        protected void clearAllTasks() {
++            RecentsView recentsView = mTaskContainer.getTaskView().getRecentsView();
++            if (recentsView == null) {
++                return;
++            }
++            View stockClearAll = recentsView.findViewById(R.id.clear_all);
++            if (stockClearAll != null) {
++                stockClearAll.performClick();
++            }
++        }
++
++        protected void launchFreeform() {
++            Task task = mTaskContainer.getTask();
++            ComponentName component = task.key.getComponent();
++            if (component != null) {
++                FreeformLauncher.launch(component.getPackageName(), component.getClassName());
++                return;
++            }
++            String packageName = task.key.getPackageName();
++            if (packageName != null) {
++                FreeformLauncher.launch(packageName);
++            }
++        }
++
+         /**
+          * Called when the overlay is no longer used.
+          */
+@@ -432,6 +458,14 @@ public class TaskOverlayFactory {
+                 endLiveTileMode(TaskOverlay.this::enterSplitSelect);
+             }
+ 
++            public void onClearAll() {
++                endLiveTileMode(TaskOverlay.this::clearAllTasks);
++            }
++
++            public void onFreeform() {
++                endLiveTileMode(TaskOverlay.this::launchFreeform);
++            }
++
+             public void onSaveAppPair() {
+                 endLiveTileMode(TaskOverlay.this::saveAppPair);
+             }
+@@ -449,6 +483,12 @@ public class TaskOverlayFactory {
+         /** User wants to start split screen with current app. */
+         void onSplit();
+ 
++        /** User wants to clear all recent tasks using the stock Recents clear-all action. */
++        void onClearAll();
++
++        /** User wants to launch the selected task in the system EdgeLauncher overlay. */
++        void onFreeform();
++
+         /** User wants to save an app pair with current group of apps. */
+         void onSaveAppPair();
+     }
+diff --git a/quickstep/src/com/android/quickstep/views/OverviewActionsView.java b/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+index 674ce5b821..6608be7678 100644
+--- a/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
++++ b/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+@@ -28,6 +28,7 @@ import android.view.KeyEvent;
+ import android.view.View;
+ import android.view.View.OnClickListener;
+ import android.widget.Button;
++import android.widget.ImageButton;
+ import android.widget.FrameLayout;
+ import android.widget.LinearLayout;
+ 
+@@ -146,7 +147,16 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+ 
+     /** Container for the action buttons below a focused, non-split Overview tile. */
+     protected LinearLayout mActionButtons;
++    private Button mScreenshotButton;
+     private Button mSplitButton;
++    private Button mClearAllButton;
++    private ImageButton mFreeformButton;
++    private boolean mCompactActionButtons;
++    private int mExpandedPaddingStart;
++    private int mExpandedPaddingTop;
++    private int mExpandedPaddingEnd;
++    private int mExpandedPaddingBottom;
++    private int mExpandedDrawablePadding;
+     /**
+      * The "save app pair" button. Currently this is the only button that is not contained in
+      * mActionButtons, since it is the sole button that appears for a grouped task.
+@@ -213,9 +223,26 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+         // casting this.
+         View screenshotButton = findViewById(R.id.action_screenshot);
+         screenshotButton.setOnClickListener(this);
++        if (screenshotButton instanceof Button) {
++            mScreenshotButton = (Button) screenshotButton;
++            mExpandedPaddingStart = mScreenshotButton.getPaddingStart();
++            mExpandedPaddingTop = mScreenshotButton.getPaddingTop();
++            mExpandedPaddingEnd = mScreenshotButton.getPaddingEnd();
++            mExpandedPaddingBottom = mScreenshotButton.getPaddingBottom();
++            mExpandedDrawablePadding = mScreenshotButton.getCompoundDrawablePadding();
++        }
+         mSplitButton = findViewById(R.id.action_split);
+         mSplitButton.setOnClickListener(this);
++        mClearAllButton = findViewById(R.id.action_clear_all);
++        if (mClearAllButton != null) {
++            mClearAllButton.setOnClickListener(this);
++        }
++        mFreeformButton = findViewById(R.id.action_freeform);
++        if (mFreeformButton != null) {
++            mFreeformButton.setOnClickListener(this);
++        }
+         mSaveAppPairButton.setOnClickListener(this);
++        applyActionButtonPresentation(false);
+     }
+ 
+     /**
+@@ -237,14 +264,140 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+             mCallbacks.onScreenshot();
+         } else if (id == R.id.action_split) {
+             mCallbacks.onSplit();
++        } else if (id == R.id.action_clear_all) {
++            mCallbacks.onClearAll();
++        } else if (id == R.id.action_freeform) {
++            mCallbacks.onFreeform();
+         } else if (id == R.id.action_save_app_pair) {
+             mCallbacks.onSaveAppPair();
+         }
+     }
+ 
++    @Override
++    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
++        /*
++         * Always measure the expanded presentation first. This is important:
++         * when a previous card/DPI forced compact mode we still need to be
++         * able to return to expanded mode when enough width becomes available.
++         */
++        if (mActionButtons != null && mTaskSize.width() > 0) {
++            if (mCompactActionButtons) {
++                mCompactActionButtons = false;
++                applyActionButtonPresentation(false);
++            }
++
++            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
++
++            final int availableWidth = mTaskSize.width();
++            final boolean compact =
++                    availableWidth > 0
++                            && mActionButtons.getMeasuredWidth() > availableWidth;
++
++            if (compact) {
++                mCompactActionButtons = true;
++                applyActionButtonPresentation(true);
++                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
++            }
++            return;
++        }
++
++        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
++    }
++
++    private void setCompactActionButtons(boolean compact) {
++        if (mCompactActionButtons == compact) {
++            return;
++        }
++        mCompactActionButtons = compact;
++        applyActionButtonPresentation(compact);
++        if (mActionButtons != null) {
++            mActionButtons.requestLayout();
++        }
++    }
++
++    private void applyActionButtonPresentation(boolean compact) {
++        if (mScreenshotButton != null) {
++            mScreenshotButton.setText(
++                    compact ? null : getContext().getText(R.string.action_screenshot));
++            mScreenshotButton.setContentDescription(
++                    compact ? getContext().getText(R.string.action_screenshot) : null);
++            applyActionButtonGeometry(mScreenshotButton, compact);
++        }
++        if (mClearAllButton != null) {
++            mClearAllButton.setText(
++                    compact ? null : getContext().getText(R.string.recents_clear_all));
++            mClearAllButton.setContentDescription(
++                    compact ? getContext().getText(R.string.recents_clear_all) : null);
++            applyActionButtonGeometry(mClearAllButton, compact);
++        }
++    }
++
++    private void applyActionButtonGeometry(Button button, boolean iconOnly) {
++        android.view.ViewGroup.LayoutParams params = button.getLayoutParams();
++        final int actionSize =
++                getResources().getDimensionPixelSize(R.dimen.overview_actions_height);
++
++        if (params != null) {
++            params.width = iconOnly
++                    ? actionSize
++                    : android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
++            params.height = iconOnly
++                    ? actionSize
++                    : android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
++            button.setLayoutParams(params);
++        }
++
++        button.setGravity(android.view.Gravity.CENTER);
++        button.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
++
++        if (iconOnly) {
++            /*
++             * drawableStart + empty text is not reliably centered by simply
++             * removing padding. Center the actual drawable inside the fixed
++             * 48dp action button.
++             */
++            android.graphics.drawable.Drawable[] drawables =
++                    button.getCompoundDrawablesRelative();
++
++            android.graphics.drawable.Drawable icon = null;
++            for (android.graphics.drawable.Drawable drawable : drawables) {
++                if (drawable != null) {
++                    icon = drawable;
++                    break;
++                }
++            }
++
++            int iconWidth = 0;
++            if (icon != null) {
++                iconWidth = Math.max(0, icon.getIntrinsicWidth());
++            }
++
++            final int horizontalPadding =
++                    Math.max(0, (actionSize - iconWidth) / 2);
++
++            button.setPaddingRelative(
++                    horizontalPadding,
++                    0,
++                    horizontalPadding,
++                    0);
++            button.setCompoundDrawablePadding(0);
++        } else {
++            button.setPaddingRelative(
++                    mExpandedPaddingStart,
++                    mExpandedPaddingTop,
++                    mExpandedPaddingEnd,
++                    mExpandedPaddingBottom);
++            button.setCompoundDrawablePadding(mExpandedDrawablePadding);
++        }
++    }
++
+     @Override
+     protected void onConfigurationChanged(Configuration newConfig) {
+         super.onConfigurationChanged(newConfig);
++        // Re-evaluate the presentation after rotation/configuration changes. Landscape visibility
++        // itself remains controlled by the stock HIDDEN_NON_ZERO_ROTATION path in RecentsView.
++        mCompactActionButtons = false;
++        applyActionButtonPresentation(false);
+         updateVerticalMargin(DisplayController.getNavigationMode(getContext()));
+     }
+ 

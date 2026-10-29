@@ -1,0 +1,1533 @@
+diff --git a/core/java/android/hardware/display/DisplayManagerInternal.java b/core/java/android/hardware/display/DisplayManagerInternal.java
+index 2174513c83e5..1505f336328e 100644
+--- a/core/java/android/hardware/display/DisplayManagerInternal.java
++++ b/core/java/android/hardware/display/DisplayManagerInternal.java
+@@ -19,16 +19,19 @@ package android.hardware.display;
+ import android.annotation.FloatRange;
+ import android.annotation.IntDef;
+ import android.annotation.Nullable;
++import android.app.IFreeformDisplayCallback;
+ import android.companion.virtual.IVirtualDevice;
+ import android.graphics.Point;
+ import android.hardware.SensorManager;
+ import android.hardware.input.HostUsiVersion;
+ import android.os.Handler;
++import android.os.IBinder;
+ import android.os.PowerManager;
+ import android.util.IntArray;
+ import android.util.SparseArray;
+ import android.view.Display;
+ import android.view.DisplayInfo;
++import android.view.Surface;
+ import android.view.SurfaceControl;
+ import android.view.SurfaceControl.RefreshRateRange;
+ import android.view.SurfaceControl.Transaction;
+@@ -48,6 +51,36 @@ import java.util.Set;
+  */
+ public abstract class DisplayManagerInternal {
+ 
++    /** Creates an Axion-style freeform display backed by the supplied surface. */
++    public abstract void createFreeformDisplay(String name, IFreeformDisplayCallback callback,
++            int width, int height, int densityDpi, boolean secure,
++            boolean ownContentOnly, boolean shouldShowSystemDecorations, Surface surface,
++            float refreshRate, long presentationDeadlineNanos);
++
++    /** Pauses rendering of a freeform display without destroying its task. */
++    public abstract void pauseFreeformDisplay(int displayId);
++
++    /** Resumes a previously paused freeform display. */
++    public abstract void resumeFreeformDisplay(int displayId);
++
++    /** Resizes the freeform display associated with the client token. */
++    public abstract void resizeFreeform(IBinder appToken, int width, int height, int densityDpi);
++
++    /** Releases the freeform display associated with the client token. */
++    public abstract void releaseFreeform(IBinder appToken);
++
++    /** Returns the logical display id associated with a freeform client token. */
++    public abstract int getDisplayIdForFreeformToken(IBinder appToken);
++
++    /** Returns whether the supplied logical display is an Axion-style freeform display. */
++    public abstract boolean isFreeformDisplayId(int displayId);
++
++    /** Pauses all active freeform displays. */
++    public abstract void pauseAllFreeformDisplays();
++
++    /** Resumes all active freeform displays. */
++    public abstract void resumeAllFreeformDisplays();
++
+     @IntDef(prefix = {"REFRESH_RATE_LIMIT_"}, value = {
+             REFRESH_RATE_LIMIT_HIGH_BRIGHTNESS_MODE
+     })
+diff --git a/packages/SystemUI/res/layout/volume_dialog.xml b/packages/SystemUI/res/layout/volume_dialog.xml
+index 9eb372e7c3b3..c4e5d76f4b4e 100644
+--- a/packages/SystemUI/res/layout/volume_dialog.xml
++++ b/packages/SystemUI/res/layout/volume_dialog.xml
+@@ -101,7 +101,24 @@
+         android:orientation="horizontal"
+         android:showDividers="middle|beginning|end"
+         app:layout_constraintBottom_toBottomOf="@id/volume_dialog_main_slider_container"
++        app:layout_constraintEnd_toStartOf="@id/volume_dialog_app_sliders_container"
++        app:layout_constraintTop_toTopOf="@id/volume_dialog_main_slider_container"/>
++
++    <LinearLayout
++        android:id="@+id/volume_dialog_app_sliders_container"
++        android:layout_width="wrap_content"
++        android:layout_height="0dp"
++        android:layout_marginTop="@dimen/volume_dialog_floating_sliders_vertical_padding_negative"
++        android:layout_marginBottom="0dp"
++        android:clipChildren="false"
++        android:clipToOutline="false"
++        android:clipToPadding="false"
++        android:divider="@drawable/volume_dialog_floating_sliders_spacer"
++        android:gravity="bottom"
++        android:orientation="horizontal"
++        android:showDividers="middle|beginning|end"
++        app:layout_constraintBottom_toBottomOf="@id/volume_dialog_background"
+         app:layout_constraintEnd_toStartOf="@id/volume_dialog_background"
+         app:layout_constraintTop_toTopOf="@id/volume_dialog_main_slider_container"/>
+ 
+-</androidx.constraintlayout.widget.ConstraintLayout>
++    </androidx.constraintlayout.widget.ConstraintLayout>
+diff --git a/packages/SystemUI/res/layout/volume_dialog_horizontal.xml b/packages/SystemUI/res/layout/volume_dialog_horizontal.xml
+index 0c6bf4b75f0c..eeec6224bd69 100644
+--- a/packages/SystemUI/res/layout/volume_dialog_horizontal.xml
++++ b/packages/SystemUI/res/layout/volume_dialog_horizontal.xml
+@@ -98,6 +98,23 @@
+         android:showDividers="middle|beginning|end"
+         app:layout_constraintStart_toStartOf="@+id/volume_dialog_main_slider_container"
+         app:layout_constraintEnd_toEndOf="@+id/volume_dialog_main_slider_container"
++        app:layout_constraintBottom_toTopOf="@+id/volume_dialog_app_sliders_container" />
++
++    <LinearLayout
++        android:id="@+id/volume_dialog_app_sliders_container"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_marginStart="@dimen/volume_dialog_floating_sliders_vertical_padding_negative"
++        android:layout_marginEnd="@dimen/volume_dialog_floating_sliders_vertical_padding_negative"
++        android:clipChildren="false"
++        android:clipToOutline="false"
++        android:clipToPadding="false"
++        android:divider="@drawable/volume_dialog_floating_sliders_spacer"
++        android:gravity="end"
++        android:orientation="vertical"
++        android:showDividers="middle|beginning|end"
++        app:layout_constraintStart_toStartOf="@+id/volume_dialog_main_slider_container"
++        app:layout_constraintEnd_toEndOf="@+id/volume_dialog_main_slider_container"
+         app:layout_constraintBottom_toTopOf="@+id/volume_dialog_background" />
+ 
+ </androidx.constraintlayout.widget.ConstraintLayout>
+diff --git a/packages/SystemUI/res/values-ru/strings.xml b/packages/SystemUI/res/values-ru/strings.xml
+index 74a93f5a7c36..82ebe02829c3 100644
+--- a/packages/SystemUI/res/values-ru/strings.xml
++++ b/packages/SystemUI/res/values-ru/strings.xml
+@@ -1724,4 +1724,5 @@
+     <string name="pager_dots_next_content_description" msgid="613943992626163120">"Далее"</string>
+     <string name="ambient_cue_autofill_action" msgid="9213025887835308128">"автозаполнение"</string>
+     <string name="ambient_cue_expand_action" msgid="6803711089932959312">"развернуть"</string>
++    <string name="app_volume_slider_content_description">Громкость: %1$s</string>
+ </resources>
+diff --git a/packages/SystemUI/res/values/strings.xml b/packages/SystemUI/res/values/strings.xml
+index 20075caa7c10..36d7a8a62b94 100644
+--- a/packages/SystemUI/res/values/strings.xml
++++ b/packages/SystemUI/res/values/strings.xml
+@@ -4582,4 +4582,5 @@
+ 
+     <!-- Description for the Ambient Cue accessibility action label for expanding. [CHAR LIMIT=NONE] -->
+     <string name="ambient_cue_expand_action">expand</string>
++    <string name="app_volume_slider_content_description">Volume for %1$s</string>
+ </resources>
+diff --git a/packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java b/packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java
+index 8bc023e244a0..30e7ab5b81a1 100644
+--- a/packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java
++++ b/packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java
+@@ -49,6 +49,7 @@ import android.app.KeyguardManager;
+ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.DialogInterface;
++import android.content.pm.ApplicationInfo;
+ import android.content.pm.PackageManager;
+ import android.content.res.ColorStateList;
+ import android.content.res.Configuration;
+@@ -73,6 +74,7 @@ import android.os.Looper;
+ import android.os.Message;
+ import android.os.SystemClock;
+ import android.os.Trace;
++import android.os.UserHandle;
+ import android.os.VibrationEffect;
+ import android.provider.Settings;
+ import android.provider.Settings.Global;
+@@ -151,8 +153,12 @@ import dagger.Lazy;
+ import java.io.PrintWriter;
+ import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.HashSet;
++import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Optional;
++import java.util.Set;
+ import java.util.function.Consumer;
+ 
+ /**
+@@ -169,6 +175,8 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+ 
+     private static final long USER_ATTEMPT_GRACE_PERIOD = 1000;
+     private static final int UPDATE_ANIMATION_DURATION = 80;
++    private static final int APP_ROW_ANIMATION_DURATION = 220;
++    private static final int APP_ROW_REMOVE_DELAY = 1200;
+ 
+     static final int DIALOG_TIMEOUT_MILLIS = 3000;
+     static final int DIALOG_SAFETYWARNING_TIMEOUT_MILLIS = 5000;
+@@ -269,6 +277,10 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+     private View mSettingsView;
+     private ImageButton mSettingsIcon;
+     private final List<VolumeRow> mRows = new ArrayList<>();
++    private final Map<String, AppVolumeRow> mAppVolumeRows = new LinkedHashMap<>();
++    private final Map<String, Runnable> mAppVolumeRemovalRunnables = new LinkedHashMap<>();
++    private List<AppVolumeController.AppState> mCurrentAppVolumeStates = Collections.emptyList();
++    private final AppVolumeController mAppVolumeController;
+     private ConfigurableTexts mConfigurableTexts;
+     private final SparseBooleanArray mDynamic = new SparseBooleanArray();
+     private final KeyguardManager mKeyguard;
+@@ -384,6 +396,8 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         mDialogTimeoutMillis = DIALOG_TIMEOUT_MILLIS;
+         mVolumePanelFlag = volumePanelFlag;
+         mInteractor = interactor;
++        mAppVolumeController =
++                new AppVolumeController(mContext, mHandler, this::onAppVolumesChangedH);
+ 
+         dumpManager.registerDumpable("VolumeDialogImpl", this);
+ 
+@@ -438,6 +452,7 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+ 
+     public void init(int windowType, Callback callback) {
+         initDialog(mActivityManager.getLockTaskModeState());
++        mAppVolumeController.start();
+ 
+         mController.addCallback(mControllerCallbackH, mHandler);
+         mController.getState();
+@@ -452,6 +467,8 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+     @Override
+     public void destroy() {
+         Log.d(TAG, "destroy() called");
++        mAppVolumeController.stop();
++        clearAppVolumeRowsH();
+         mController.removeCallback(mControllerCallbackH);
+         mHandler.removeCallbacksAndMessages(null);
+         mConfigurationController.removeCallback(this);
+@@ -514,6 +531,7 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+ 
+     private void initDialog(int lockTaskModeState) {
+         Log.d(TAG, "initDialog: called!");
++        clearAppVolumeRowsH();
+         mDialog = new CustomDialog(mContext);
+         initDimens();
+ 
+@@ -728,6 +746,7 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         initSettingsH(lockTaskModeState);
+         initODICaptionsH();
+         mAccessibility.init();
++        syncAppVolumeRowsH(mCurrentAppVolumeStates, false);
+     }
+ 
+     private boolean isWindowGravityLeft() {
+@@ -800,7 +819,12 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         if (D.BUG) Slog.d(TAG, "Adding row for stream " + stream);
+         VolumeRow row = new VolumeRow();
+         initRow(row, stream, iconRes, iconMuteRes, important, defaultStream);
+-        mDialogRowsView.addView(row.view);
++        if (isRtl() && !mAppVolumeRows.isEmpty()) {
++            mDialogRowsView.addView(
++                    row.view, mDialogRowsView.getChildCount() - mAppVolumeRows.size());
++        } else {
++            mDialogRowsView.addView(row.view);
++        }
+         mRows.add(row);
+     }
+ 
+@@ -950,6 +974,397 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         }
+     }
+ 
++    private void onAppVolumesChangedH(List<AppVolumeController.AppState> apps) {
++        if (Looper.myLooper() != mHandler.getLooper()) {
++            mHandler.post(() -> onAppVolumesChangedH(apps));
++            return;
++        }
++        mCurrentAppVolumeStates = new ArrayList<>(apps);
++        if (mDialogRowsView != null) {
++            syncAppVolumeRowsH(mCurrentAppVolumeStates, mShowing);
++        }
++    }
++
++    private void syncAppVolumeRowsH(
++            List<AppVolumeController.AppState> apps, boolean animate) {
++        final Set<String> activeKeys = new HashSet<>();
++
++        for (AppVolumeController.AppState state : apps) {
++            activeKeys.add(state.key);
++            cancelAppVolumeRowRemovalH(state.key);
++
++            AppVolumeRow row = mAppVolumeRows.get(state.key);
++            if (row == null) {
++                row = addAppVolumeRowH(state, animate);
++            } else {
++                cancelAppVolumeRowExitH(row);
++                final boolean identityChanged = !row.state.packageName.equals(state.packageName)
++                        || row.state.userId != state.userId;
++                row.state = state;
++                if (identityChanged) {
++                    row.label = loadAppVolumeLabel(state);
++                }
++                updateAppVolumeRowH(row, state.volume);
++                updateAppVolumeRowAccessibilityH(row);
++            }
++        }
++
++        final List<String> removedKeys = new ArrayList<>();
++        for (String key : mAppVolumeRows.keySet()) {
++            if (!activeKeys.contains(key)) {
++                removedKeys.add(key);
++            }
++        }
++        for (String key : removedKeys) {
++            scheduleAppVolumeRowRemovalH(key);
++        }
++    }
++
++    @SuppressLint("InflateParams")
++    private AppVolumeRow addAppVolumeRowH(
++            AppVolumeController.AppState state, boolean animate) {
++        final AppVolumeRow row = new AppVolumeRow();
++        row.state = state;
++        row.view = mDialog.getLayoutInflater().inflate(R.layout.volume_dialog_row, null);
++        row.slider = row.view.findViewById(R.id.volume_row_slider);
++        row.slider.setMin(0);
++        row.slider.setMax(100);
++        row.slider.setProgress(state.volume, false);
++        row.slider.setAccessibilityDelegate(new VolumeDialogSeekBarAccessibilityDelegate(5));
++
++        final LayerDrawable seekbarDrawable =
++                (LayerDrawable) mContext.getDrawable(R.drawable.volume_row_seekbar).mutate();
++        final LayerDrawable seekbarProgressDrawable =
++                (LayerDrawable) ((RoundedCornerProgressDrawable) seekbarDrawable
++                        .findDrawableByLayerId(android.R.id.progress)).getDrawable();
++        row.sliderProgressSolid = seekbarProgressDrawable.findDrawableByLayerId(
++                R.id.volume_seekbar_progress_solid);
++        final Drawable sliderProgressIcon = seekbarProgressDrawable.findDrawableByLayerId(
++                R.id.volume_seekbar_progress_icon);
++        row.sliderProgressIcon = sliderProgressIcon != null
++                ? (AlphaTintDrawableWrapper) ((RotateDrawable) sliderProgressIcon).getDrawable()
++                : null;
++        row.slider.setProgressDrawable(seekbarDrawable);
++
++        final ColorStateList accent = Utils.getColorAccent(mContext);
++        row.sliderProgressSolid.setTintList(accent);
++        if (row.sliderProgressIcon != null) {
++            final Drawable appIcon = loadAppVolumeIcon(state);
++            row.sliderProgressIcon.setTintList(null);
++            row.sliderProgressIcon.setDrawable(appIcon);
++        }
++
++        row.createPlugin(row.slider, mVibratorHelper, mMSDLPlayer, mSystemClock);
++        HapticSliderViewBinder.bind(row.slider, row.mHapticPlugin);
++        row.slider.setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
++            @Override
++            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
++                if (!fromUser) {
++                    return;
++                }
++                row.volume = progress;
++                row.deliverOnProgressChangedHaptics(true, progress);
++                mAppVolumeController.setAppVolume(row.state.key, progress);
++                updateAppVolumeRowAccessibilityH(row);
++                rescheduleTimeoutH();
++            }
++
++            @Override
++            public void onStartTrackingTouch(SeekBar seekBar) {
++                row.tracking = true;
++                if (row.mHapticPlugin != null) {
++                    row.mHapticPlugin.onStartTrackingTouch();
++                }
++                rescheduleTimeoutH();
++            }
++
++            @Override
++            public void onStopTrackingTouch(SeekBar seekBar) {
++                row.tracking = false;
++                if (row.mHapticPlugin != null) {
++                    row.mHapticPlugin.onStopTrackingTouch();
++                }
++                rescheduleTimeoutH();
++            }
++        });
++
++        row.volume = state.volume;
++        row.label = loadAppVolumeLabel(state);
++        updateAppVolumeRowAccessibilityH(row);
++
++        final LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
++                animate ? 0 : mDialogWidth, WRAP_CONTENT);
++        applyAppVolumeRowMarginsH(lp, animate ? 0 : mRingerRowsPadding);
++        final int index = isRtl() ? mDialogRowsView.getChildCount() : 0;
++        mDialogRowsView.addView(row.view, index, lp);
++        mAppVolumeRows.put(state.key, row);
++
++        if (mShowing) {
++            row.addTouchListener();
++        }
++        if (animate) {
++            animateAppVolumeRowInH(row);
++        }
++        return row;
++    }
++
++    private void updateAppVolumeRowH(AppVolumeRow row, int volume) {
++        row.volume = volume;
++        if (row.tracking || row.slider.getProgress() == volume) {
++            return;
++        }
++
++        if (!mShowing || !row.view.isShown()) {
++            row.slider.setProgress(volume, false);
++            return;
++        }
++
++        if (row.progressAnimator != null) {
++            row.progressAnimator.cancel();
++        }
++        row.progressAnimator = ObjectAnimator.ofInt(
++                row.slider, "progress", row.slider.getProgress(), volume);
++        row.progressAnimator.setDuration(UPDATE_ANIMATION_DURATION);
++        row.progressAnimator.setInterpolator(new DecelerateInterpolator());
++        row.progressAnimator.start();
++    }
++
++    private void animateAppVolumeRowInH(AppVolumeRow row) {
++        if (row.sizeAnimator != null) {
++            row.sizeAnimator.cancel();
++        }
++        final float startTranslation = (isWindowGravityLeft() ? -1 : 1) * mDialogWidth * 0.35f;
++        row.view.setAlpha(0f);
++        row.view.setTranslationX(startTranslation);
++
++        row.sizeAnimator = ValueAnimator.ofInt(0, mDialogWidth);
++        row.sizeAnimator.setDuration(APP_ROW_ANIMATION_DURATION);
++        row.sizeAnimator.setInterpolator(Interpolators.EMPHASIZED_DECELERATE);
++        row.sizeAnimator.addUpdateListener(animator -> {
++            final ViewGroup.LayoutParams params = row.view.getLayoutParams();
++            params.width = (int) animator.getAnimatedValue();
++            if (params instanceof LinearLayout.LayoutParams) {
++                applyAppVolumeRowMarginsH(
++                        (LinearLayout.LayoutParams) params,
++                        Math.round(mRingerRowsPadding * animator.getAnimatedFraction()));
++            }
++            row.view.setLayoutParams(params);
++        });
++        row.sizeAnimator.start();
++        row.view.animate()
++                .alpha(1f)
++                .translationX(0f)
++                .setDuration(APP_ROW_ANIMATION_DURATION)
++                .setInterpolator(Interpolators.EMPHASIZED_DECELERATE)
++                .start();
++    }
++
++    private void scheduleAppVolumeRowRemovalH(String key) {
++        if (mAppVolumeRemovalRunnables.containsKey(key)) {
++            return;
++        }
++
++        if (!mShowing) {
++            removeAppVolumeRowH(key, false);
++            return;
++        }
++
++        final Runnable removal = () -> {
++            mAppVolumeRemovalRunnables.remove(key);
++            removeAppVolumeRowH(key, true);
++        };
++        mAppVolumeRemovalRunnables.put(key, removal);
++        mHandler.postDelayed(removal, APP_ROW_REMOVE_DELAY);
++    }
++
++    private void cancelAppVolumeRowRemovalH(String key) {
++        final Runnable removal = mAppVolumeRemovalRunnables.remove(key);
++        if (removal != null) {
++            mHandler.removeCallbacks(removal);
++        }
++    }
++
++    private void removeAppVolumeRowH(String key, boolean animate) {
++        final AppVolumeRow row = mAppVolumeRows.get(key);
++        if (row == null) {
++            return;
++        }
++        cancelAppVolumeRowRemovalH(key);
++        row.removeHaptics();
++        if (row.progressAnimator != null) {
++            row.progressAnimator.cancel();
++        }
++        if (row.sizeAnimator != null) {
++            row.sizeAnimator.cancel();
++        }
++        row.view.animate().cancel();
++
++        if (!animate || mDialogRowsView == null) {
++            mAppVolumeRows.remove(key);
++            row.removing = false;
++            if (mDialogRowsView != null) {
++                mDialogRowsView.removeView(row.view);
++            }
++            return;
++        }
++
++        row.removing = true;
++        final int width = Math.max(1, row.view.getWidth());
++        final float endTranslation = (isWindowGravityLeft() ? -1 : 1) * mDialogWidth * 0.35f;
++        row.sizeAnimator = ValueAnimator.ofInt(width, 0);
++        row.sizeAnimator.setDuration(APP_ROW_ANIMATION_DURATION);
++        row.sizeAnimator.setInterpolator(Interpolators.EMPHASIZED_DECELERATE);
++        row.sizeAnimator.addUpdateListener(animator -> {
++            final ViewGroup.LayoutParams params = row.view.getLayoutParams();
++            params.width = (int) animator.getAnimatedValue();
++            if (params instanceof LinearLayout.LayoutParams) {
++                applyAppVolumeRowMarginsH(
++                        (LinearLayout.LayoutParams) params,
++                        Math.round(mRingerRowsPadding * (1f - animator.getAnimatedFraction())));
++            }
++            row.view.setLayoutParams(params);
++        });
++        row.sizeAnimator.addListener(new AnimatorListenerAdapter() {
++            @Override
++            public void onAnimationEnd(Animator animation) {
++                if (!row.removing) {
++                    return;
++                }
++                row.removing = false;
++                mAppVolumeRows.remove(key);
++                if (mDialogRowsView != null) {
++                    mDialogRowsView.removeView(row.view);
++                }
++            }
++        });
++        row.sizeAnimator.start();
++        row.view.animate()
++                .alpha(0f)
++                .translationX(endTranslation)
++                .setDuration(APP_ROW_ANIMATION_DURATION)
++                .setInterpolator(Interpolators.EMPHASIZED_DECELERATE)
++                .start();
++    }
++
++    private void cancelAppVolumeRowExitH(AppVolumeRow row) {
++        if (!row.removing) {
++            return;
++        }
++        row.removing = false;
++        if (row.sizeAnimator != null) {
++            row.sizeAnimator.cancel();
++        }
++        row.view.animate().cancel();
++        final ViewGroup.LayoutParams params = row.view.getLayoutParams();
++        params.width = mDialogWidth;
++        if (params instanceof LinearLayout.LayoutParams) {
++            applyAppVolumeRowMarginsH(
++                    (LinearLayout.LayoutParams) params, mRingerRowsPadding);
++        }
++        row.view.setLayoutParams(params);
++        row.view.setAlpha(1f);
++        row.view.setTranslationX(0f);
++        if (mShowing) {
++            row.addTouchListener();
++        }
++    }
++
++    private void clearAppVolumeRowsH() {
++        for (Runnable removal : mAppVolumeRemovalRunnables.values()) {
++            mHandler.removeCallbacks(removal);
++        }
++        mAppVolumeRemovalRunnables.clear();
++
++        for (AppVolumeRow row : mAppVolumeRows.values()) {
++            row.removing = false;
++            row.removeHaptics();
++            if (row.progressAnimator != null) {
++                row.progressAnimator.cancel();
++            }
++            if (row.sizeAnimator != null) {
++                row.sizeAnimator.cancel();
++            }
++            row.view.animate().cancel();
++            if (mDialogRowsView != null) {
++                mDialogRowsView.removeView(row.view);
++            }
++        }
++        mAppVolumeRows.clear();
++    }
++
++    private void updateAppVolumeRowMarginsH() {
++        if (mDialogRowsView == null) {
++            return;
++        }
++        for (AppVolumeRow row : mAppVolumeRows.values()) {
++            final ViewGroup.LayoutParams params = row.view.getLayoutParams();
++            if (params instanceof LinearLayout.LayoutParams) {
++                applyAppVolumeRowMarginsH((LinearLayout.LayoutParams) params);
++                row.view.setLayoutParams(params);
++            }
++        }
++
++        // Keep app rows on the inward side of the primary stream after an RTL change.
++        final List<AppVolumeRow> rows = new ArrayList<>(mAppVolumeRows.values());
++        for (AppVolumeRow row : rows) {
++            mDialogRowsView.removeView(row.view);
++        }
++        if (isRtl()) {
++            for (AppVolumeRow row : rows) {
++                mDialogRowsView.addView(row.view);
++            }
++        } else {
++            for (int i = 0; i < rows.size(); i++) {
++                mDialogRowsView.addView(rows.get(i).view, i);
++            }
++        }
++    }
++
++    private void applyAppVolumeRowMarginsH(LinearLayout.LayoutParams lp) {
++        applyAppVolumeRowMarginsH(lp, mRingerRowsPadding);
++    }
++
++    private void applyAppVolumeRowMarginsH(LinearLayout.LayoutParams lp, int spacing) {
++        lp.setMarginStart(isRtl() ? spacing : 0);
++        lp.setMarginEnd(isRtl() ? 0 : spacing);
++    }
++
++    private Drawable loadAppVolumeIcon(AppVolumeController.AppState state) {
++        try {
++            final Context packageContext = mContext.createContextAsUser(
++                    UserHandle.of(state.userId), 0);
++            final PackageManager pm = packageContext.getPackageManager();
++            final ApplicationInfo info = pm.getApplicationInfo(state.packageName, 0);
++            final Drawable icon = info.loadIcon(pm);
++            if (icon != null) {
++                final Drawable mutableIcon = icon.mutate();
++                mutableIcon.setTintList(null);
++                return mutableIcon;
++            }
++        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
++            Log.d(TAG, "Unable to load app icon for " + state.packageName, e);
++        }
++        return mContext.getDrawable(R.drawable.ic_volume_media).mutate();
++    }
++
++    private CharSequence loadAppVolumeLabel(AppVolumeController.AppState state) {
++        try {
++            final Context packageContext = mContext.createContextAsUser(
++                    UserHandle.of(state.userId), 0);
++            final PackageManager pm = packageContext.getPackageManager();
++            final ApplicationInfo info = pm.getApplicationInfo(state.packageName, 0);
++            final CharSequence label = info.loadLabel(pm);
++            return label != null ? label : state.packageName;
++        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
++            return state.packageName;
++        }
++    }
++
++    private void updateAppVolumeRowAccessibilityH(AppVolumeRow row) {
++        row.slider.setContentDescription(
++                mContext.getString(R.string.app_volume_slider_content_description, row.label));
++    }
++
+     @VisibleForTesting void removeDismissMessages() {
+         mHandler.removeMessages(H.DISMISS);
+     }
+@@ -1543,6 +1958,9 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+                 row.addTouchListener();
+             }
+         }
++        for (AppVolumeRow row : mAppVolumeRows.values()) {
++            row.addTouchListener();
++        }
+         Trace.endSection();
+     }
+ 
+@@ -1598,6 +2016,9 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         for (int i = 0; i < mRows.size(); i++) {
+             mRows.get(i).removeHaptics();
+         }
++        for (AppVolumeRow row : mAppVolumeRows.values()) {
++            row.removeHaptics();
++        }
+         Log.i(TAG, "mDialog.dismiss() reason: " + Events.DISMISS_REASONS[reason]
+                 + " from: " + Debug.getCaller());
+ 
+@@ -2319,7 +2740,8 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+                 visibleRows++;
+             }
+         }
+-        return (visibleRows - 1) * (mDialogWidth + mRingerRowsPadding);
++        return (visibleRows - 1 + mAppVolumeRows.size())
++                * (mDialogWidth + mRingerRowsPadding);
+     }
+ 
+     private void updateBackgroundForDrawerClosedAmount() {
+@@ -2443,6 +2865,7 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         @Override
+         public void onLayoutDirectionChanged(int layoutDirection) {
+             mDialogView.setLayoutDirection(layoutDirection);
++            updateAppVolumeRowMarginsH();
+         }
+ 
+         @Override
+@@ -2684,6 +3107,59 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
+         }
+     }
+ 
++    private static class AppVolumeRow {
++        AppVolumeController.AppState state;
++        View view;
++        SeekBar slider;
++        Drawable sliderProgressSolid;
++        AlphaTintDrawableWrapper sliderProgressIcon;
++        CharSequence label;
++        int volume;
++        boolean tracking;
++        boolean removing;
++        ObjectAnimator progressAnimator;
++        ValueAnimator sizeAnimator;
++        HapticSliderPlugin mHapticPlugin;
++
++        void createPlugin(
++                SeekBar seekBar,
++                VibratorHelper vibratorHelper,
++                MSDLPlayer msdlPlayer,
++                com.android.systemui.util.time.SystemClock systemClock) {
++            if (mHapticPlugin != null) {
++                return;
++            }
++            mHapticPlugin = new HapticSliderPlugin(
++                    vibratorHelper,
++                    msdlPlayer,
++                    systemClock,
++                    new HapticSlider.SeekBar(seekBar),
++                    VolumeRow.sSliderHapticFeedbackConfig,
++                    VolumeRow.sSliderTrackerConfig);
++        }
++
++        @SuppressLint("ClickableViewAccessibility")
++        void addTouchListener() {
++            slider.setOnTouchListener((view, event) -> {
++                if (mHapticPlugin != null) {
++                    mHapticPlugin.onTouchEvent(event);
++                }
++                return false;
++            });
++        }
++
++        @SuppressLint("ClickableViewAccessibility")
++        void removeHaptics() {
++            slider.setOnTouchListener(null);
++        }
++
++        void deliverOnProgressChangedHaptics(boolean fromUser, int progress) {
++            if (mHapticPlugin != null) {
++                mHapticPlugin.onProgressChanged(progress, fromUser);
++            }
++        }
++    }
++
+     private static class VolumeRow {
+         private static final SliderHapticFeedbackConfig sSliderHapticFeedbackConfig =
+                 new SliderHapticFeedbackConfig(
+diff --git a/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt b/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt
+index 8a9a87014880..9db2147d16d6 100644
+--- a/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt
++++ b/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt
+@@ -51,6 +51,10 @@ constructor(
+     private var pluginComponent: VolumeDialogPluginComponent? = null
+ 
+     override fun init(windowType: Int, callback: VolumeDialog.Callback?) {
++        // Keep simultaneous playback enabled through the platform API. AudioService persists
++        // the value in Settings.System, so no shell/settings command is required.
++        runCatching { audioManager.setMultiAudioFocusEnabled(true) }
++
+         job =
+             applicationCoroutineScope.launch {
+                 coroutineScopeTraced("[Volume]plugin") {
+diff --git a/packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt b/packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt
+index 527f8bdeda91..393a19780eae 100644
+--- a/packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt
++++ b/packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt
+@@ -16,22 +16,72 @@
+ 
+ package com.android.systemui.volume.dialog.sliders.ui
+ 
++import android.content.Context
++import android.graphics.drawable.Drawable
++import android.os.Handler
++import android.os.Looper
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
++import android.widget.ImageView
+ import androidx.annotation.LayoutRes
++import androidx.compose.foundation.gestures.Orientation
++import androidx.compose.foundation.interaction.MutableInteractionSource
++import androidx.compose.foundation.layout.size
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.SliderDefaults
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.ComposeView
++import androidx.compose.ui.unit.DpSize
++import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.util.fastForEachIndexed
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import com.android.app.tracing.coroutines.launchInTraced
+ import com.android.app.tracing.coroutines.launchTraced
++import com.android.compose.theme.PlatformTheme
++import com.android.systemui.common.shared.model.ContentDescription
++import com.android.systemui.common.shared.model.Icon
++import com.android.systemui.common.ui.compose.Icon as SysUiIcon
++import com.android.systemui.haptics.slider.SliderHapticFeedbackFilter
++import com.android.systemui.haptics.slider.compose.ui.SliderHapticsViewModel
+ import com.android.systemui.res.R
++import com.android.systemui.volume.AppVolumeController
+ import com.android.systemui.volume.dialog.dagger.scope.VolumeDialogScope
++import com.android.systemui.volume.dialog.domain.interactor.DesktopAudioTileDetailsFeatureInteractor
++import com.android.systemui.volume.dialog.domain.interactor.VolumeDialogVisibilityInteractor
+ import com.android.systemui.volume.dialog.sliders.dagger.VolumeDialogSliderComponent
++import com.android.systemui.volume.dialog.sliders.ui.compose.SliderTrack
+ import com.android.systemui.volume.dialog.sliders.ui.viewmodel.VolumeDialogSlidersViewModel
+ import com.android.systemui.volume.dialog.ui.binder.ViewBinder
+ import com.android.systemui.volume.dialog.ui.viewmodel.VolumeDialogViewModel
++import com.android.systemui.volume.haptics.ui.VolumeHapticsConfigsProvider
++import com.android.systemui.volume.ui.compose.slider.AccessibilityParams
++import com.android.systemui.volume.ui.compose.slider.Haptics
++import com.android.systemui.volume.ui.compose.slider.Slider
++import com.android.systemui.volume.ui.compose.slider.SliderIcon
+ import javax.inject.Inject
++import kotlin.math.roundToInt
+ import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.onEach
++import androidx.compose.foundation.background
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.viewinterop.AndroidView
++
++private const val APP_SLIDER_REMOVAL_DELAY_MS = 1200L
++private const val APP_SLIDER_ANIMATION_DURATION_MS = 200L
++private const val APP_VOLUME_MAX = 100
+ 
+ @VolumeDialogScope
+ class VolumeDialogSlidersViewBinder
+@@ -39,11 +89,18 @@ class VolumeDialogSlidersViewBinder
+ constructor(
+     private val viewModel: VolumeDialogSlidersViewModel,
+     private val dialogViewModel: VolumeDialogViewModel,
++    private val hapticsViewModelFactory: SliderHapticsViewModel.Factory,
++    private val desktopAudioTileDetailsFeatureInteractor: DesktopAudioTileDetailsFeatureInteractor,
++    private val visibilityInteractor: VolumeDialogVisibilityInteractor,
+ ) : ViewBinder {
+ 
++    private val isVolumeDialogVertical = !desktopAudioTileDetailsFeatureInteractor.isEnabled()
++
+     override fun CoroutineScope.bind(view: View) {
+         val floatingSlidersContainer: ViewGroup =
+             view.requireViewById(R.id.volume_dialog_floating_sliders_container)
++        val appSlidersContainer: ViewGroup =
++            view.requireViewById(R.id.volume_dialog_app_sliders_container)
+         val mainSliderContainer: View =
+             view.requireViewById(R.id.volume_dialog_main_slider_container)
+         val background: View = view.requireViewById(R.id.volume_dialog_background)
+@@ -51,8 +108,13 @@ constructor(
+         val topSection: View = view.requireViewById(R.id.volume_dialog_top_section_container)
+ 
+         launchTraced("VDSVB#addTouchableBounds") {
+-            dialogViewModel.addTouchableBounds(mainSliderContainer, floatingSlidersContainer)
++            dialogViewModel.addTouchableBounds(
++                mainSliderContainer,
++                floatingSlidersContainer,
++                appSlidersContainer,
++            )
+         }
++
+         viewModel.sliders
+             .onEach { uiModel ->
+                 bindSlider(
+@@ -72,6 +134,8 @@ constructor(
+                 }
+             }
+             .launchInTraced("VDSVB#sliders", this)
++
++        bindAppVolumeSliders(appSlidersContainer)
+     }
+ 
+     private fun CoroutineScope.bindSlider(
+@@ -82,6 +146,468 @@ constructor(
+         with(component.sliderViewBinder()) { bind(sliderContainer) }
+         with(component.overscrollViewBinder()) { bind(sliderContainer, viewsToAnimate) }
+     }
++
++    private fun CoroutineScope.bindAppVolumeSliders(
++        container: ViewGroup,
++    ) {
++        val context = container.context
++        val handler = Handler(Looper.getMainLooper())
++        val holders = LinkedHashMap<String, AppSliderHolder>()
++        val pendingRemovals = LinkedHashMap<String, Runnable>()
++        var initialSnapshot = true
++
++        lateinit var controller: AppVolumeController
++        controller =
++            AppVolumeController(
++                context,
++                handler,
++                AppVolumeController.Listener { apps ->
++                    val animateNewSliders = !initialSnapshot
++                    val activeKeys = HashSet<String>(apps.size)
++                    for (app in apps) {
++                        activeKeys.add(app.key)
++                        pendingRemovals.remove(app.key)?.let(handler::removeCallbacks)
++
++                        val holder =
++                            holders[app.key]
++                                ?: createAppSlider(
++                                        container = container,
++                                        app = app,
++                                        controller = controller,
++                                        animate = animateNewSliders,
++                                    )
++                                    .also { holders[app.key] = it }
++                        holder.volume.value = app.volume
++                    }
++
++                    val disappeared = holders.keys.filterNot(activeKeys::contains)
++                    for (key in disappeared) {
++                        if (pendingRemovals.containsKey(key)) {
++                            continue
++                        }
++                        val removal =
++                            Runnable {
++                                pendingRemovals.remove(key)
++                                holders.remove(key)?.let { holder ->
++                                    animateAppSliderRemoval(container, holder)
++                                }
++                            }
++                        pendingRemovals[key] = removal
++                        handler.postDelayed(removal, APP_SLIDER_REMOVAL_DELAY_MS)
++                    }
++                    initialSnapshot = false
++                },
++            )
++
++        controller.start()
++
++        coroutineContext[Job]?.invokeOnCompletion {
++            handler.post {
++                pendingRemovals.values.forEach(handler::removeCallbacks)
++                pendingRemovals.clear()
++                controller.stop()
++                holders.clear()
++            }
++        }
++    }
++
++    private fun createAppSlider(
++        container: ViewGroup,
++        app: AppVolumeController.AppState,
++        controller: AppVolumeController,
++        animate: Boolean,
++    ): AppSliderHolder {
++        val context = container.context
++        val root =
++            LayoutInflater.from(context)
++                .inflate(R.layout.volume_dialog_slider_floating, container, false)
++        // Fill the app-volume column vertically without changing stock sliders.
++        // The app icon remains inside the bottom section of this pill.
++        if (isVolumeDialogVertical) {
++            root.layoutParams?.height = ViewGroup.LayoutParams.MATCH_PARENT
++        }
++        val composeView: ComposeView = root.requireViewById(R.id.volume_dialog_slider)
++        val volume = MutableStateFlow(app.volume)
++        val visuals = loadAppVisuals(context, app.packageName)
++        // Keep the app icon in the dedicated bottom section in vertical mode.
++        // It must stay outside SliderTrack so the original app drawable is not
++        // recolored by active/inactive track state.
++
++
++        composeView.setContent {
++            PlatformTheme {
++                AppVolumeSlider(
++                    volume = volume,
++                    label = visuals.label,
++                    icon = visuals.icon,
++                    drawable = visuals.drawable,
++                    showIconInTrack = !isVolumeDialogVertical,
++                    isVolumeDialogVertical = isVolumeDialogVertical,
++                    hapticsViewModelFactory = hapticsViewModelFactory,
++                    onVolumeChanged = { newVolume ->
++                        volume.value = newVolume
++                        visibilityInteractor.resetDismissTimeout()
++                        controller.setAppVolume(app.key, newVolume)
++                    },
++                )
++            }
++        }
++
++        if (animate) {
++            root.alpha = 0f
++            if (isVolumeDialogVertical) {
++                root.translationX = 12.dpToPx(context)
++            } else {
++                root.translationY = -12.dpToPx(context)
++            }
++        } else {
++            root.alpha = 1f
++            root.translationX = 0f
++            root.translationY = 0f
++        }
++        container.addView(root)
++        if (animate) {
++            root.animate()
++                .alpha(1f)
++                .translationX(0f)
++                .translationY(0f)
++                .setDuration(APP_SLIDER_ANIMATION_DURATION_MS)
++                .start()
++        }
++
++        return AppSliderHolder(root = root, volume = volume)
++    }
++
++    private fun animateAppSliderRemoval(
++        container: ViewGroup,
++        holder: AppSliderHolder,
++    ) {
++        holder.root
++            .animate()
++            .alpha(0f)
++            .translationX(
++                if (isVolumeDialogVertical) {
++                    12.dpToPx(holder.root.context)
++                } else {
++                    0f
++                }
++            )
++            .translationY(
++                if (isVolumeDialogVertical) {
++                    0f
++                } else {
++                    -12.dpToPx(holder.root.context)
++                }
++            )
++            .setDuration(APP_SLIDER_ANIMATION_DURATION_MS)
++            .withEndAction {
++                if (holder.root.parent === container) {
++                    container.removeView(holder.root)
++                }
++            }
++            .start()
++    }
++
++    private data class AppSliderHolder(
++        val root: View,
++        val volume: MutableStateFlow<Int>,
++    )
++
++    private data class AppVisuals(
++        val label: String,
++        val icon: Icon.Loaded,
++        val drawable: Drawable,
++    )
++
++    private fun loadAppVisuals(context: Context, packageName: String): AppVisuals {
++        val packageManager = context.packageManager
++        val applicationInfo =
++            runCatching { packageManager.getApplicationInfo(packageName, 0) }.getOrNull()
++        val label =
++            applicationInfo?.loadLabel(packageManager)?.toString()?.takeIf { it.isNotBlank() }
++                ?: packageName
++        val drawable = applicationInfo?.loadIcon(packageManager) ?: packageManager.defaultActivityIcon
++        return AppVisuals(
++            label = label,
++            icon = Icon.Loaded(drawable, ContentDescription.Loaded(label)),
++            drawable = drawable,
++        )
++    }
++
++}
++
++@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
++@Composable
++private fun AppVolumeSlider(
++    volume: MutableStateFlow<Int>,
++    label: String,
++    icon: Icon.Loaded,
++    drawable: Drawable,
++    showIconInTrack: Boolean,
++    isVolumeDialogVertical: Boolean,
++    hapticsViewModelFactory: SliderHapticsViewModel.Factory,
++    onVolumeChanged: (Int) -> Unit,
++) {
++    val currentVolume = volume.collectAsStateWithLifecycle().value
++
++    val colors =
++        SliderDefaults.colors(
++            activeTickColor = MaterialTheme.colorScheme.surfaceContainerHighest,
++            inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
++            disabledActiveTickColor = MaterialTheme.colorScheme.surfaceContainerHighest,
++            disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
++        )
++
++    val interactionSource =
++        remember { MutableInteractionSource() }
++
++    /*
++     * Desktop / horizontal mode keeps the existing stock-style behavior.
++     */
++    if (!isVolumeDialogVertical) {
++        Slider(
++            value = currentVolume.toFloat(),
++            valueRange = 0f..APP_VOLUME_MAX.toFloat(),
++            onValueChanged = {
++                onVolumeChanged(
++                    it.roundToInt()
++                        .coerceIn(0, APP_VOLUME_MAX)
++                )
++            },
++            onValueChangeFinished = {},
++            isEnabled = true,
++            isReverseDirection = true,
++            isVertical = false,
++            colors = colors,
++            interactionSource = interactionSource,
++            haptics =
++                Haptics.Enabled(
++                    hapticsViewModelFactory = hapticsViewModelFactory,
++                    hapticConfigs =
++                        VolumeHapticsConfigsProvider.continuousConfigs(
++                            SliderHapticFeedbackFilter()
++                        ),
++                    orientation = Orientation.Horizontal,
++                ),
++            stepDistance = 1f,
++            track = { sliderState ->
++                SliderTrack(
++                    sliderState,
++                    colors = colors,
++                    isEnabled = true,
++                    isVertical = false,
++                    activeTrackEndIcon =
++                        if (showIconInTrack) {
++                            { iconsState ->
++                                SliderIcon(
++                                    icon = {
++                                        SysUiIcon(
++                                            icon = icon,
++                                            tint = null,
++                                            modifier = Modifier.size(20.dp),
++                                        )
++                                    },
++                                    isVisible =
++                                        !iconsState.isInactiveTrackEndIconVisible,
++                                )
++                            }
++                        } else {
++                            null
++                        },
++                    inactiveTrackEndIcon =
++                        if (showIconInTrack) {
++                            { iconsState ->
++                                SliderIcon(
++                                    icon = {
++                                        SysUiIcon(
++                                            icon = icon,
++                                            tint = null,
++                                            modifier = Modifier.size(20.dp),
++                                        )
++                                    },
++                                    isVisible =
++                                        iconsState.isInactiveTrackEndIconVisible,
++                                )
++                            }
++                        } else {
++                            null
++                        },
++                )
++            },
++            thumb = { sliderState, interactions ->
++                SliderDefaults.Thumb(
++                    sliderState = sliderState,
++                    interactionSource = interactions,
++                    enabled = true,
++                    colors = colors,
++                    thumbSize = DpSize(4.dp, 52.dp),
++                )
++            },
++            accessibilityParams =
++                AccessibilityParams(
++                    contentDescription =
++                        androidx.compose.ui.platform.LocalContext.current
++                            .getString(
++                                R.string.app_volume_slider_content_description,
++                                label,
++                            )
++                ),
++        )
++
++        return
++    }
++
++    /*
++     * Phone / vertical mode:
++     *
++     * ONE floating pill:
++     *
++     * ┌───────────┐
++     * │           │
++     * │  slider   │
++     * │           │
++     * ├───────────┤
++     * │ app icon  │
++     * └───────────┘
++     *
++     * The background comes from volume_dialog_slider_floating.xml,
++     * therefore the lower icon section is part of the SAME card.
++     */
++
++    Column(
++        modifier = Modifier.fillMaxSize(),
++        horizontalAlignment = Alignment.CenterHorizontally,
++    ) {
++        Box(
++            modifier =
++                Modifier
++                    .weight(1f)
++                    .fillMaxWidth()
++                    .padding(
++                        start = 4.dp,
++                        end = 4.dp,
++                        top = 4.dp,
++                        bottom = 0.dp,
++                    ),
++            contentAlignment = Alignment.Center,
++        ) {
++            Slider(
++                value = currentVolume.toFloat(),
++                valueRange = 0f..APP_VOLUME_MAX.toFloat(),
++                onValueChanged = {
++                    onVolumeChanged(
++                        it.roundToInt()
++                            .coerceIn(0, APP_VOLUME_MAX)
++                    )
++                },
++                onValueChangeFinished = {},
++                isEnabled = true,
++                isReverseDirection = true,
++                isVertical = true,
++                colors = colors,
++                interactionSource = interactionSource,
++                haptics =
++                    Haptics.Enabled(
++                        hapticsViewModelFactory = hapticsViewModelFactory,
++                        hapticConfigs =
++                            VolumeHapticsConfigsProvider.continuousConfigs(
++                                SliderHapticFeedbackFilter()
++                            ),
++                        orientation = Orientation.Vertical,
++                    ),
++                stepDistance = 1f,
++                track = { sliderState ->
++                    SliderTrack(
++                        sliderState,
++                        colors = colors,
++                        isEnabled = true,
++                        isVertical = true,
++
++                        // Never put the app icon into the vertical track.
++                        activeTrackEndIcon = null,
++                        inactiveTrackEndIcon = null,
++                    )
++                },
++                thumb = { sliderState, interactions ->
++                    SliderDefaults.Thumb(
++                        sliderState = sliderState,
++                        interactionSource = interactions,
++                        enabled = true,
++                        colors = colors,
++                        thumbSize = DpSize(52.dp, 4.dp),
++                    )
++                },
++                accessibilityParams =
++                    AccessibilityParams(
++                        contentDescription =
++                            androidx.compose.ui.platform.LocalContext.current
++                                .getString(
++                                    R.string.app_volume_slider_content_description,
++                                    label,
++                                )
++                    ),
++                modifier = Modifier.fillMaxSize(),
++            )
++        }
++
++        /*
++         * Same separator relationship as the stock lower controls.
++         */
++        Box(
++            modifier =
++                Modifier
++                    .padding(horizontal = 8.dp)
++                    .fillMaxWidth()
++                    .height(2.dp)
++                    .background(
++                        MaterialTheme.colorScheme.onSurface.copy(
++                            alpha = 0.24f
++                        )
++                    )
++        )
++
++        /*
++         * Bottom section is INSIDE the same floating pill.
++         *
++         * Android ImageView is intentional:
++         * it guarantees the actual application Drawable is rendered without
++         * Material/Slider tinting.
++         */
++        Box(
++            modifier =
++                Modifier
++                    .fillMaxWidth()
++                    .height(48.dp),
++            contentAlignment = Alignment.Center,
++        ) {
++            AndroidView(
++                modifier = Modifier.size(30.dp),
++                factory = { context ->
++                    ImageView(context).apply {
++                        scaleType =
++                            ImageView.ScaleType.CENTER_INSIDE
++
++                        isClickable = false
++                        isFocusable = false
++
++                        imageTintList = null
++                        clearColorFilter()
++                    }
++                },
++                update = { imageView ->
++                    val iconDrawable =
++                        drawable.constantState
++                            ?.newDrawable(imageView.resources)
++                            ?.mutate()
++                            ?: drawable.mutate()
++
++                    imageView.imageTintList = null
++                    imageView.clearColorFilter()
++                    imageView.setImageDrawable(iconDrawable)
++                },
++            )
++        }
++    }
+ }
+ 
+ private fun ViewGroup.ensureChildCount(@LayoutRes viewLayoutId: Int, count: Int) {
+@@ -96,3 +622,5 @@ private fun ViewGroup.ensureChildCount(@LayoutRes viewLayoutId: Int, count: Int)
+         }
+     }
+ }
++
++private fun Int.dpToPx(context: Context): Float = this * context.resources.displayMetrics.density
+diff --git a/services/core/java/com/android/server/display/DisplayManagerService.java b/services/core/java/com/android/server/display/DisplayManagerService.java
+index e032b4e33200..185f8ce3b199 100644
+--- a/services/core/java/com/android/server/display/DisplayManagerService.java
++++ b/services/core/java/com/android/server/display/DisplayManagerService.java
+@@ -530,6 +530,7 @@ public final class DisplayManagerService extends SystemService {
+     private final Spline mMinimumBrightnessSpline;
+     private final ColorSpace mWideColorSpace;
+     private final OverlayProperties mOverlayProperties;
++    private MiFreeformDisplayAdapter mMiFreeformDisplayAdapter;
+ 
+     private SensorManager mSensorManager;
+     private BrightnessTracker mBrightnessTracker;
+@@ -2386,6 +2387,7 @@ public final class DisplayManagerService extends SystemService {
+             if (shouldRegisterNonEssentialDisplayAdaptersLocked()) {
+                 registerOverlayDisplayAdapterLocked();
+                 registerWifiDisplayAdapterLocked();
++                registerMiFreeformDisplayAdapterLocked();
+             }
+         }
+     }
+@@ -2406,6 +2408,12 @@ public final class DisplayManagerService extends SystemService {
+         }
+     }
+ 
++    private void registerMiFreeformDisplayAdapterLocked() {
++        mMiFreeformDisplayAdapter = new MiFreeformDisplayAdapter(
++                mSyncRoot, mContext, mHandler, mDisplayDeviceRepo, mLogicalDisplayMapper, mFlags);
++        registerDisplayAdapterLocked(mMiFreeformDisplayAdapter);
++    }
++
+     private boolean shouldRegisterNonEssentialDisplayAdaptersLocked() {
+         // In safe mode, we disable non-essential display adapters to give the user
+         // an opportunity to fix broken settings or other problems that might affect
+@@ -5864,6 +5872,122 @@ public final class DisplayManagerService extends SystemService {
+             mHandler.sendEmptyMessage(MSG_LOAD_BRIGHTNESS_CONFIGURATIONS);
+         }
+ 
++        @Override
++        public void createFreeformDisplay(String name, android.app.IFreeformDisplayCallback callback,
++                int width, int height, int densityDpi, boolean secure,
++                boolean ownContentOnly, boolean shouldShowSystemDecorations, Surface surface,
++                float refreshRate, long presentationDeadlineNanos) {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter != null) {
++                    mMiFreeformDisplayAdapter.createFreeformLocked(name, callback, width, height,
++                            densityDpi, secure, ownContentOnly, shouldShowSystemDecorations, surface,
++                            refreshRate, presentationDeadlineNanos);
++                }
++            }
++        }
++
++        @Override
++        public void pauseFreeformDisplay(int displayId) {
++            synchronized (mSyncRoot) {
++                LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(displayId);
++                if (display != null) {
++                    DisplayDevice device = display.getPrimaryDisplayDeviceLocked();
++                    if (device != null) {
++                        device.requestDisplayStateLocked(Display.STATE_OFF, 0f, 0f, null);
++                    }
++                }
++            }
++        }
++
++        @Override
++        public void resumeFreeformDisplay(int displayId) {
++            synchronized (mSyncRoot) {
++                LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(displayId);
++                if (display != null) {
++                    DisplayDevice device = display.getPrimaryDisplayDeviceLocked();
++                    if (device != null) {
++                        device.requestDisplayStateLocked(Display.STATE_ON, 1.0f, 1.0f, null);
++                    }
++                }
++            }
++        }
++
++        @Override
++        public void resizeFreeform(IBinder appToken, int width, int height, int densityDpi) {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter != null) {
++                    mMiFreeformDisplayAdapter.resizeFreeform(appToken, width, height, densityDpi);
++                }
++            }
++        }
++
++        @Override
++        public void releaseFreeform(IBinder appToken) {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter != null) {
++                    mMiFreeformDisplayAdapter.releaseFreeform(appToken);
++                }
++            }
++        }
++
++        @Override
++        public int getDisplayIdForFreeformToken(IBinder appToken) {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter != null) {
++                    return mMiFreeformDisplayAdapter.getDisplayIdForToken(appToken);
++                }
++                return -1;
++            }
++        }
++
++        @Override
++        public boolean isFreeformDisplayId(int displayId) {
++            synchronized (mSyncRoot) {
++                return mMiFreeformDisplayAdapter != null
++                        && mMiFreeformDisplayAdapter.isFreeformDisplayIdLocked(displayId);
++            }
++        }
++
++        @Override
++        public void pauseAllFreeformDisplays() {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter == null) {
++                    return;
++                }
++                List<Integer> displayIds = mMiFreeformDisplayAdapter.getAllFreeformDisplayIdsLocked();
++                for (int displayId : displayIds) {
++                    LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(displayId);
++                    if (display != null) {
++                        DisplayDevice device = display.getPrimaryDisplayDeviceLocked();
++                        if (device != null) {
++                            device.requestDisplayStateLocked(Display.STATE_OFF, 0f, 0f, null);
++                        }
++                    }
++                }
++                Slog.d(TAG, "Paused " + displayIds.size() + " freeform displays");
++            }
++        }
++
++        @Override
++        public void resumeAllFreeformDisplays() {
++            synchronized (mSyncRoot) {
++                if (mMiFreeformDisplayAdapter == null) {
++                    return;
++                }
++                List<Integer> displayIds = mMiFreeformDisplayAdapter.getAllFreeformDisplayIdsLocked();
++                for (int displayId : displayIds) {
++                    LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(displayId);
++                    if (display != null) {
++                        DisplayDevice device = display.getPrimaryDisplayDeviceLocked();
++                        if (device != null) {
++                            device.requestDisplayStateLocked(Display.STATE_ON, 1.0f, 1.0f, null);
++                        }
++                    }
++                }
++                Slog.d(TAG, "Resumed " + displayIds.size() + " freeform displays");
++            }
++        }
++
+         @Override
+         public int createVirtualDisplay(VirtualDisplayConfig config,
+                 IVirtualDisplayCallback callback, IVirtualDevice virtualDevice,
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index a184d6a7efe8..08434f3fb0a4 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -313,6 +313,7 @@ import com.android.server.wallpapereffectsgeneration.WallpaperEffectsGenerationM
+ import com.android.server.wearable.WearableSensingManagerService;
+ import com.android.server.webkit.WebViewUpdateService;
+ import com.android.server.wm.ActivityTaskManagerService;
++import com.android.server.wm.FreeformOverlayManagerService;
+ import com.android.server.wm.WindowManagerGlobalLock;
+ import com.android.server.wm.WindowManagerService;
+ 
+@@ -1767,6 +1768,10 @@ public final class SystemServer implements Dumpable {
+             mDisplayManagerService.windowManagerAndInputReady();
+             t.traceEnd();
+ 
++            t.traceBegin("StartFreeformOverlayManagerService");
++            mSystemServiceManager.startService(FreeformOverlayManagerService.class);
++            t.traceEnd();
++
+             if (mFactoryTestMode == FactoryTest.FACTORY_TEST_LOW_LEVEL) {
+                 Slog.i(TAG, "No Bluetooth Service (factory test)");
+             } else if (!context.getPackageManager().hasSystemFeature

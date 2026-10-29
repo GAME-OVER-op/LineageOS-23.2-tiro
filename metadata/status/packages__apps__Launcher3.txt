@@ -1,0 +1,5 @@
+ M quickstep/res/layout/overview_actions_container.xml
+ M quickstep/src/com/android/quickstep/TaskOverlayFactory.java
+ M quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+?? quickstep/res/drawable/ic_overview_clear_all.xml
+?? quickstep/res/drawable/ic_overview_freeform.xml

@@ -1,0 +1,2 @@
+ M configs/pineapple/audio_effects.conf
+ M configs/pineapple/audio_effects.xml

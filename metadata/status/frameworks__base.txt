@@ -1,0 +1,16 @@
+ M core/java/android/hardware/display/DisplayManagerInternal.java
+ M packages/SystemUI/res/layout/volume_dialog.xml
+ M packages/SystemUI/res/layout/volume_dialog_horizontal.xml
+ M packages/SystemUI/res/values-ru/strings.xml
+ M packages/SystemUI/res/values/strings.xml
+ M packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java
+ M packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt
+ M packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt
+ M services/core/java/com/android/server/display/DisplayManagerService.java
+ M services/java/com/android/server/SystemServer.java
+?? core/java/android/app/FreeformLauncher.java
+?? core/java/android/app/IFreeformDisplayCallback.aidl
+?? core/java/android/app/IFreeformOverlayManager.aidl
+?? packages/SystemUI/src/com/android/systemui/volume/AppVolumeController.java
+?? services/core/java/com/android/server/display/MiFreeformDisplayAdapter.java
+?? services/core/java/com/android/server/wm/FreeformOverlayManagerService.java

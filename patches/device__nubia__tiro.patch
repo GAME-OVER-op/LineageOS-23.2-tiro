@@ -1,0 +1,92 @@
+diff --git a/audio/mixer_paths_pineapple_mtp.xml b/audio/mixer_paths_pineapple_mtp.xml
+index ef0f560..963b989 100644
+--- a/audio/mixer_paths_pineapple_mtp.xml
++++ b/audio/mixer_paths_pineapple_mtp.xml
+@@ -179,8 +179,8 @@
+     <!-- Volume controls -->
+     <ctl name="WSA_RX0 Digital Volume" value="75" />
+     <ctl name="WSA_RX1 Digital Volume" value="75" />
+-    <ctl name="RX_RX0 Digital Volume" value="84" />
+-    <ctl name="RX_RX1 Digital Volume" value="84" />
++    <ctl name="RX_RX0 Digital Volume" value="90" />
++    <ctl name="RX_RX1 Digital Volume" value="90" />
+     <ctl name="RX_RX2 Digital Volume" value="84" />
+     <ctl name="HPHL Volume" value="10" />
+     <ctl name="HPHR Volume" value="10" />
+@@ -627,8 +627,8 @@
+         <ctl name="HPHR XTALK" value="1" />
+         <ctl name="HPHL_RDAC Switch" value="1" />
+         <ctl name="HPHR_RDAC Switch" value="1" />
+-        <ctl name="RX_RX0 Digital Volume" value="76" />
+-        <ctl name="RX_RX1 Digital Volume" value="76" />
++        <ctl name="RX_RX0 Digital Volume" value="90" />
++        <ctl name="RX_RX1 Digital Volume" value="90" />
+     </path>
+ 
+     <path name="color-light">
+diff --git a/device.mk b/device.mk
+index 869e137..b25f4f8 100644
+--- a/device.mk
++++ b/device.mk
+@@ -20,6 +20,19 @@ PRODUCT_SOONG_NAMESPACES += \
+ PRODUCT_PACKAGES += \
+     NubiaParts
+ 
++# Freeform overlay host (Stage 1)
++PRODUCT_PACKAGES += \
++    EdgeLauncher
++
++# Basic Call Recorder
++ifeq ($(strip $(TARGET_PREBUILT_BCR)),true)
++PRODUCT_PACKAGES += \
++    Bcr
++endif
++
++# DTS:X Ultra
++$(call inherit-product, vendor/nubia/tiro/dtsx/dtsx.mk)
++
+ # Overlays
+ PRODUCT_PACKAGES += \
+     SettingsProviderResTiro
+diff --git a/lineage_tiro.mk b/lineage_tiro.mk
+index 0cf6549..479e2e5 100644
+--- a/lineage_tiro.mk
++++ b/lineage_tiro.mk
+@@ -4,12 +4,18 @@
+ #
+ 
+ # Inherit from those products. Most specific first.
+-$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
++$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+ 
+ # Inherit from device.
++# Basic Call Recorder
++TARGET_PREBUILT_BCR := true
++
+ $(call inherit-product, device/nubia/tiro/device.mk)
+ 
++# DTS:X Ultra replaces Lineage AudioFX
++TARGET_EXCLUDES_AUDIOFX := true
++
+ # Inherit some common Lineage stuff.
+ $(call inherit-product, vendor/lineage/config/common_full_phone.mk)
+ 
+@@ -20,11 +26,16 @@ TARGET_SCREEN_WIDTH := 1116
+ PRODUCT_BRAND := nubia
+ PRODUCT_DEVICE := tiro
+ PRODUCT_MANUFACTURER := nubia
+-PRODUCT_MODEL := NX769J
++PRODUCT_MODEL := ZTE A2020G Pro
+ PRODUCT_NAME := lineage_tiro
+ PRODUCT_SYSTEM_DEVICE := NX769J
+ PRODUCT_SYSTEM_NAME := NX769J-UN
+ 
++# === DTSX identity compatibility ===
++PRODUCT_SYSTEM_PROPERTIES += \
++    ro.build.product=P855A01
++# === End DTSX identity compatibility ===
++
+ PRODUCT_GMS_CLIENTID_BASE := android-zte
+ 
+ PRODUCT_BUILD_PROP_OVERRIDES += \

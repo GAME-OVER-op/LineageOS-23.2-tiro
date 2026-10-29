@@ -1,0 +1,151 @@
+diff --git a/configs/pineapple/audio_effects.conf b/configs/pineapple/audio_effects.conf
+index 7dce3ddbb..9316fe5b4 100644
+--- a/configs/pineapple/audio_effects.conf
++++ b/configs/pineapple/audio_effects.conf
+@@ -6,6 +6,9 @@
+ #        }
+ #    }
+ libraries {
++  dtsaudio {
++    path /vendor/lib64/soundfx/libdtsaudio.so
++  }
+   bundle {
+     path /vendor/lib/soundfx/libbundlewrapper.so
+   }
+@@ -76,6 +79,10 @@ libraries {
+ #    }
+ 
+ effects {
++  dts_audio {
++    library dtsaudio
++    uuid 146edfc0-7ed2-11e4-80eb-0002a5d5c51b
++  }
+ 
+ # additions for the proxy implementation
+ # Proxy implementation
+@@ -269,26 +276,47 @@ effects {
+ # UUID generated using version 1
+ 
+ output_session_processing {
++    system {
++    }
++    bluetooth_sco {
++    }
++    dtmf {
++    }
++    enforced_audible {
++    }
++    accessibility {
++    }
++    tts {
++    }
++    assistant {
++    }
++    call_assistant {
++    }
++    patch {
++        dts_audio {
++        }
++    }
++    rerouting {
++        dts_audio {
++        }
++    }
+     music {
+-        music_helper {
++        dts_audio {
+         }
++
+     }
+     ring {
+-        ring_helper {
+-        }
++
+     }
+     alarm {
+-        alarm_helper {
+-        }
++
+     }
+     # stream type voice_call is used for VoIP call
+     voice_call {
+-        voice_helper {
+-        }
++
+     }
+     notification {
+-        notification_helper {
+-        }
++
+     }
+ }
+ 
+diff --git a/configs/pineapple/audio_effects.xml b/configs/pineapple/audio_effects.xml
+index 6af7c7075..159b393bb 100644
+--- a/configs/pineapple/audio_effects.xml
++++ b/configs/pineapple/audio_effects.xml
+@@ -62,6 +62,7 @@
+ 
+ <audio_effects_conf version="2.0" xmlns="http://schemas.android.com/audio/audio_effects_conf/v2_0">
+     <libraries>
++        <library name="dtsaudio" path="libdtsaudio.so"/>
+         <library name="bundle" path="libbundlewrapper.so"/>
+         <library name="reverb" path="libreverbwrapper.so"/>
+         <library name="visualizer_sw" path="libvisualizer.so"/>
+@@ -77,6 +78,7 @@
+         <library name="quasar" path="libquasar.so"/>
+     </libraries>
+     <effects>
++        <effect name="dts_audio" library="dtsaudio" uuid="146edfc0-7ed2-11e4-80eb-0002a5d5c51b"/>
+         <effectProxy name="bassboost" library="proxy" uuid="14804144-a5ee-4d24-aa88-0002a5d5c51b">
+             <libsw library="bundle" uuid="8631f300-72e2-11df-b57e-0002a5d5c51b"/>
+             <libhw library="offload_bundle" uuid="2c4a8c24-1581-487f-94f6-0002a5d5c51b"/>
+@@ -125,20 +127,43 @@
+         <effect name="quasar" library="quasar" uuid="71d0e2ee-e44d-483d-a809-09e75ee55ecd"/>
+     </effects>
+     <postprocess>
++        <stream type="system">
++        </stream>
++        <stream type="bluetooth_sco">
++        </stream>
++        <stream type="dtmf">
++        </stream>
++        <stream type="enforced_audible">
++        </stream>
++        <stream type="accessibility">
++        </stream>
++        <stream type="tts">
++        </stream>
++        <stream type="assistant">
++        </stream>
++        <stream type="call_assistant">
++        </stream>
++        <stream type="patch">
++            <apply effect="dts_audio"/>
++        </stream>
++        <stream type="rerouting">
++            <apply effect="dts_audio"/>
++        </stream>
+         <stream type="music">
+-            <apply effect="music_helper"/>
++            <apply effect="dts_audio"/>
++
+         </stream>
+         <stream type="ring">
+-            <apply effect="ring_helper"/>
++
+         </stream>
+         <stream type="alarm">
+-            <apply effect="alarm_helper"/>
++
+         </stream>
+         <stream type="voice_call">
+-            <apply effect="voice_helper"/>
++
+         </stream>
+         <stream type="notification">
+-            <apply effect="notification_helper"/>
++
+         </stream>
+     </postprocess>
+     <preprocess>

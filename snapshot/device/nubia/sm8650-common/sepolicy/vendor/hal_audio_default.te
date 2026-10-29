@@ -1,0 +1,6 @@
+# DTS:X Ultra uses SQLite locking/ioctl on its vendor tuning database.
+allow hal_audio_default vendor_configs_file:file { lock ioctl };
+
+# DTS licensing enumerates network interfaces under /sys/class/net.
+allow hal_audio_default sysfs_net:dir { open read search getattr };
+allow hal_audio_default sysfs_net:file { open read getattr };

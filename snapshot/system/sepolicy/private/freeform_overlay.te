@@ -1,0 +1,4 @@
+type freeform_overlay_service, system_api_service, system_server_service, service_manager_type;
+
+# EdgeLauncher is platform-signed and runs under android.uid.system.
+allow system_app freeform_overlay_service:service_manager find;

@@ -1,0 +1,8 @@
+project	base_commit	remote
+device/nubia/sm8650-common	40474c7116446f859a577d29dbf9538116e766fe	https://github.com/nubia-sm8650-devs/android_device_nubia_sm8650-common
+device/nubia/tiro	fc515f3c96971e12ac6e0f7a1e5516469d7ed7d0	https://github.com/nubia-sm8650-devs/android_device_nubia_tiro
+frameworks/base	958afcc3d647d57571650cee4172afe0da619171	https://github.com/LineageOS/android_frameworks_base
+hardware/qcom-caf/sm8650/audio/primary-hal	2aa541f626ecc029fce24f3882aaee84c11fb161	https://github.com/LineageOS/android_hardware_qcom_audio-ar
+packages/apps/Launcher3	f83fbe24ed3c0bd3c4d7cd3186ffadefeda5b7db	https://github.com/LineageOS/android_packages_apps_Launcher3
+system/sepolicy	885cc500f6078a766d1f6def5ce4c06c55841773	https://github.com/LineageOS/android_system_sepolicy
+vendor/nubia/tiro	573dd0a30f59bf70f5615e648bcffc5bfe91da41	https://github.com/nubia-sm8650-devs/proprietary_vendor_nubia_tiro
