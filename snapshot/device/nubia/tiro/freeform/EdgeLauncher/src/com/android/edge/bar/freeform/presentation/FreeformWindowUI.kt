@@ -19,6 +19,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.TextureView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -34,6 +35,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -87,11 +89,18 @@ fun FreeformWindowContent(
     fun onSetDragging(dragging: Boolean) {
     }
 
-    AnimatedVisibility(
-        visible = !isBubbleMode,
-        enter = fadeIn() + composeScaleIn(initialScale = 0.92f),
-        exit = fadeOut() + composeScaleOut(targetScale = 0.92f)
-    ) {
+    // Keep the window mounted while it is minimized to a bubble. In
+    // particular the TextureView that hosts the virtual display must NOT be
+    // removed from composition: doing so destroys its surface, forces the
+    // creation of a new freeform display on expand and moves the app task to
+    // it, which recreates the Activity and loses in-memory state (playback).
+    // Fade it out visually instead — the display and the task stay alive.
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (isBubbleMode) 0f else 1f,
+        animationSpec = tween(if (isBubbleMode) 220 else 300),
+        label = "freeform-content-alpha"
+    )
+    Box(modifier = Modifier.fillMaxSize().alpha(contentAlpha)) {
         FullWindowView(
             state = state,
             stateManager = stateManager,

@@ -435,15 +435,14 @@ class FreeformStateManager(
             )
         }
 
-        val displayId = currentState.displayId
-        if (displayId >= 0) {
-            acceptsDisplayPauseCallback = true
-            repository.pauseDisplay(displayId)
-        }
+        // Do NOT power the virtual display off here. Display.STATE_OFF makes
+        // WindowManager add a sleep token for this display, which puts every
+        // Activity on it to sleep; on resume they are recreated, so the app
+        // loses its task state (e.g. playback) while the process stays alive.
+        // The bubble only hides the window visually; display and task stay on.
     }
-    
+
     private suspend fun handleBubbleExpand() {
-        acceptsDisplayPauseCallback = false
         cancelBubblePositionAnimation()
         freeformWindowManager.releaseBubbleSlot(windowPackageName)
 
@@ -478,18 +477,15 @@ class FreeformStateManager(
         if (displayId >= 0) {
             surfaceEventsManager.dispatch(SurfaceEvent.ShowVeilRequested(VeilReason.BUBBLE_EXPAND))
             surfaceEventsManager.dispatch(SurfaceEvent.OperationStarted("bubble_expand"))
-            
-            val result = repository.resumeDisplay(displayId)
-            result.onSuccess {
-                resizeDisplaySurface()
-                delay(FreeformConstants.DELAY_SURFACE_SETTLE_MS)
-                dispatch(WindowEvent.SurfaceSettled)
-                surfaceEventsManager.dispatch(SurfaceEvent.OperationCompleted("bubble_expand"))
-            }.onFailure {
-                Log.e(TAG, "Failed to resume display", it)
-                surfaceEventsManager.dispatch(SurfaceEvent.OperationCompleted("bubble_expand"))
-                dispatch(WindowEvent.SurfaceSettled)
-            }
+
+            // The display was never powered off (see handleMinimize), so there
+            // is nothing to resume — just make sure its size matches the
+            // restored window. No new display is created and the existing app
+            // task/Activity is kept, so in-memory state survives the round trip.
+            resizeDisplaySurface()
+            delay(FreeformConstants.DELAY_SURFACE_SETTLE_MS)
+            dispatch(WindowEvent.SurfaceSettled)
+            surfaceEventsManager.dispatch(SurfaceEvent.OperationCompleted("bubble_expand"))
         } else {
             dispatch(WindowEvent.SurfaceSettled)
         }

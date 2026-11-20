@@ -32,7 +32,9 @@ cd /path/to/android-source && ./build.sh
   `snapshot/device/nubia/sm8650-common/parts/` and `.../hardware/`;
 - **Freeform / EdgeLauncher** integration (virtual-display based floating windows,
   smooth scale-up fullscreen expansion and DPI restoration) under
-  `snapshot/device/nubia/tiro/freeform/`;
+  `snapshot/device/nubia/tiro/freeform/`. Minimize-to-bubble keeps the window's
+  `TextureView`/virtual display mounted and never powers the display off, so
+  reopening does not recreate the app Activity or lose playback/task state;
 - custom SystemUI per-app volume implementation (AppVolumeController + dialog sliders/binder);
 - Launcher3 overview freeform action;
 - audio HAL / DTS:X Ultra changes, SELinux changes, ABL payload, LTE+ carrier config;
