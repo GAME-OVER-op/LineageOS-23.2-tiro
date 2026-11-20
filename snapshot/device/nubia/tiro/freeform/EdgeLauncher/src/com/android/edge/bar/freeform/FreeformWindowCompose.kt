@@ -167,15 +167,17 @@ class FreeformWindowCompose(
         destroyed = true
         Log.i(TAG, "destroy called: $reason")
 
-        if (::textureView.isInitialized) {
-            textureView.surfaceTexture?.let { surface ->
-                Log.i(TAG, "Releasing surface texture")
-                surface.release()
-            }
-            textureView.surfaceTextureListener = null
-        }
-        
         windowController.destroy(reason) {
+            // Keep the app surface alive until the scale-out animation ends;
+            // releasing it here used to make the content vanish instantly and
+            // left only an empty frame fading out.
+            if (::textureView.isInitialized) {
+                textureView.surfaceTexture?.let { surface ->
+                    Log.i(TAG, "Releasing surface texture")
+                    surface.release()
+                }
+                textureView.surfaceTextureListener = null
+            }
             viewModel.destroy()
         }
     }

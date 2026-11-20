@@ -1,0 +1,4 @@
+ M libs/gui/Android.bp
+ M libs/gui/Surface.cpp
+ M libs/gui/include/gui/Surface.h
+?? libs/gui/QtiExtension/

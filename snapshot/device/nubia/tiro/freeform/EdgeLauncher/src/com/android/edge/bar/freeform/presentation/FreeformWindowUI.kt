@@ -89,8 +89,8 @@ fun FreeformWindowContent(
 
     AnimatedVisibility(
         visible = !isBubbleMode,
-        enter = fadeIn(),
-        exit = fadeOut()
+        enter = fadeIn() + composeScaleIn(initialScale = 0.92f),
+        exit = fadeOut() + composeScaleOut(targetScale = 0.92f)
     ) {
         FullWindowView(
             state = state,

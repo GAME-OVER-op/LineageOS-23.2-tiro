@@ -66,6 +66,14 @@ class InputInjector(private val context: Context) {
         
         private const val DEFAULT_SWIPE_DURATION = 300
         private const val FRICTION_VELOCITY_THRESHOLD = 500f
+
+        private val TRANSITION_ACTIONS = setOf(
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL,
+            MotionEvent.ACTION_POINTER_DOWN,
+            MotionEvent.ACTION_POINTER_UP,
+        )
     }
     
     fun setScale(viewWidth: Int, viewHeight: Int, displayWidth: Int, displayHeight: Int) {
@@ -365,13 +373,15 @@ class InputInjector(private val context: Context) {
 
     private fun injectInputEvent(event: InputEvent): Boolean {
         return try {
-            val mode = if (event is MotionEvent) {
-                INJECT_INPUT_EVENT_MODE_ASYNC
-            } else {
-                INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
+            // A dropped ACTION_DOWN makes every following MOVE/UP of that
+            // gesture get ignored by the target display. Wait for finish on
+            // transitions, keep MOVE async so dragging stays responsive.
+            val mode = when {
+                event !is MotionEvent -> INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
+                event.actionMasked in TRANSITION_ACTIONS -> INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
+                else -> INJECT_INPUT_EVENT_MODE_ASYNC
             }
             inputManager.injectInputEvent(event, mode)
-            true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to inject input event", e)
             false

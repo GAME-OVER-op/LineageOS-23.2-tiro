@@ -1,0 +1,31 @@
+type devicesettings_app, domain;
+app_domain(devicesettings_app)
+
+allow devicesettings_app {
+    app_api_service
+}:service_manager find;
+
+# Nubia fan configuration is event-driven. The app only updates the persistent
+# configuration file; the native service owns all sysfs fan access.
+allow devicesettings_app system_data_file:dir search;
+allow devicesettings_app nubia_fan_data_file:dir create_dir_perms;
+allow devicesettings_app nubia_fan_data_file:file create_file_perms;
+
+# Nubia lighting configuration/runtime state is event driven. NubiaParts never
+# accesses AW22xxx sysfs directly.
+allow devicesettings_app nubia_lighting_data_file:dir create_dir_perms;
+allow devicesettings_app nubia_lighting_data_file:file create_file_perms;
+
+
+# Settings publishes event snapshots and per-app trigger profiles.
+allow devicesettings_app nubia_trigger_data_file:dir create_dir_perms;
+allow devicesettings_app nubia_trigger_data_file:file create_file_perms;
+
+# The data directories can stay labeled system_data_file when init cannot
+# relabel them from system_ext rc. Keep a fallback so configuration writes
+# never silently fail in that case.
+allow devicesettings_app system_data_file:dir { open read write search add_name remove_name create getattr setattr };
+allow devicesettings_app system_data_file:file { open read write create rename unlink getattr setattr append };
+
+# Exempt from system_data_file write neverallow (see system/private/attributes).
+typeattribute devicesettings_app nubia_data_writer;

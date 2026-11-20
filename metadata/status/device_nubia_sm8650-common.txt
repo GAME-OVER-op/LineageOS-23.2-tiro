@@ -1,0 +1,42 @@
+ M audio/usecaseKvManager.xml
+ M common.mk
+ M gps/android/utils/Android.bp
+ M parts/AndroidManifest.xml
+ M parts/res/values/strings.xml
+ M parts/res/xml/fan_preferences.xml
+ M parts/res/xml/nubia_preferences.xml
+ M parts/res/xml/trigger_preferences.xml
+ M parts/src/org/lineageos/settings/BootReceiver.kt
+ M parts/src/org/lineageos/settings/fan/FanController.kt
+ M parts/src/org/lineageos/settings/fan/FanFragment.kt
+ M parts/src/org/lineageos/settings/fan/FanTileService.kt
+ M parts/src/org/lineageos/settings/trigger/TriggerController.kt
+ M parts/src/org/lineageos/settings/trigger/TriggerFragment.kt
+ M rootdir/etc/init.qcom.rc
+ M rro_overlays/CarrierConfigResCommon_Sys/res/xml/vendor.xml
+ M sepolicy/private/devicesettings_app.te
+ M sepolicy/private/file.te
+ M sepolicy/private/genfs_contexts
+?? hardware/
+?? parts/res/drawable/ic_lighting.xml
+?? parts/res/drawable/trigger_profile_card.xml
+?? parts/res/layout/
+?? parts/res/values-ru/
+?? parts/res/values/arrays.xml
+?? parts/res/values/strings_lighting.xml
+?? parts/res/xml/lighting_preferences.xml
+?? parts/src/org/lineageos/settings/NubiaApplication.kt
+?? parts/src/org/lineageos/settings/fan/FanConfigStore.kt
+?? parts/src/org/lineageos/settings/fan/FanCurvePreference.kt
+?? parts/src/org/lineageos/settings/lighting/
+?? parts/src/org/lineageos/settings/service/
+?? parts/src/org/lineageos/settings/trigger/TriggerAppsActivity.kt
+?? parts/src/org/lineageos/settings/trigger/TriggerEditorService.kt
+?? parts/src/org/lineageos/settings/trigger/TriggerProfileActivity.kt
+?? parts/src/org/lineageos/settings/trigger/TriggerProfileStore.kt
+?? parts/src/org/lineageos/settings/trigger/TriggerRuntimeController.kt
+?? sepolicy/private/file_contexts
+?? sepolicy/private/nubia_fan_service.te
+?? sepolicy/private/nubia_lighting_service.te
+?? sepolicy/private/nubia_trigger_service.te
+?? sepolicy/vendor/hal_audio_default.te

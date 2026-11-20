@@ -40,9 +40,9 @@ class WindowController(
     companion object {
         private const val TAG = "WindowController"
         private const val SHOW_DURATION_MS = 420L
-        private const val HIDE_DURATION_MS = 320L
+        private const val HIDE_DURATION_MS = 300L
         private const val WINDOW_SCALE_FROM = 0.92f
-        private const val WINDOW_SCALE_TO = 0.92f
+        private const val WINDOW_SCALE_TO = 0.86f
 
         private val SHOW_INTERPOLATOR = PathInterpolator(0.20f, 0.94f, 0.05f, 1f)
         private val HIDE_INTERPOLATOR = PathInterpolator(0.40f, 0f, 0f, 1f)

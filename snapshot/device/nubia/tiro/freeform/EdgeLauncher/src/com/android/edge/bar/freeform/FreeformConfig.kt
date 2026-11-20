@@ -40,11 +40,21 @@ class FreeformConfig(
         context.dpToPx(FreeformConstants.DEFAULT_HEIGHT_DP)
     }
 
-    val densityDpi: Int = if (isDesktopMode) {
+    private val hostDensityDpi: Int = displayMetrics.densityDpi
+    private val hostWidthPx: Int = displayMetrics.widthPixels.coerceAtLeast(1)
+
+    /**
+     * Scale density together with the window width so the app always sees roughly
+     * the same logical width in dp. A fixed density (or fixed 0.85 scale) makes a
+     * small window report a tiny dp viewport, so apps draw oversized controls.
+     */
+    fun densityForWidth(widthPx: Int): Int = if (isDesktopMode) {
         284
     } else {
-        (context.resources.displayMetrics.densityDpi * densityScale).toInt()
+        (hostDensityDpi.toFloat() * widthPx / hostWidthPx).toInt().coerceAtLeast(120)
     }
+
+    val densityDpi: Int = densityForWidth(width)
 
     val titleBarHeight: Int = if (isDesktopMode) {
         context.dpToPx(FreeformConstants.DESKTOP_TITLE_BAR_HEIGHT_DP)

@@ -37,5 +37,33 @@ $(call inherit-product, vendor/nubia/tiro/dtsx/dtsx.mk)
 PRODUCT_PACKAGES += \
     SettingsProviderResTiro
 
+# GPP frame generation (Qualcomm FRC++ via vendor.gppservice) -- DISABLED
+#
+# NOTE (2026-11-20): The ROM-side GPP/FRC++ integration is present in the tree
+# (frameworks/native/libs/gui/QtiExtension/* and the hooks in Surface.cpp) but
+# is intentionally switched off with vendor.gpp.create_frc_extension=0.
+#
+# Reason: the GPP binder/libgui part works (libgppextension.so Init/Deinit are
+# reached and vendor.gppservice creates a session for the game SurfaceView),
+# but the downstream Qualcomm VPP usecase on tiro (SM8650 / NX769J) cannot
+# start frame interpolation. Observed with logcat on device:
+#   vpp-uc: u32VppUsecase_ObtainProcessingService (1931): configure dynamic failed, ret=7
+#   vpp-uc: u32VppUsecase_UpdateFramerate (1837): ConfigureDynamic() failed, so can't process, ret=7
+#   adsprpc: vppservice: fastrpc_get_info_from_dsp: could not obtain dsp information, err val -111
+#   VppComponent: [com.mobile.legends-N] VPP processStart_l failure, cancel the output buffer
+# The frame rate therefore stays at the app value (60 Hz) instead of being
+# interpolated to 120 Hz. The VPP configstore on tiro also ships with
+# enable=false / disable_dynamic_hal=true; flipping those and swapping in the
+# stock NX809J GPP/VPP libraries did not fix ConfigureDynamic() (ret=7).
+# Keeping the extension enabled only adds log spam / extra binder sessions
+# without producing interpolated frames, so it is disabled here.
+#
+# To re-enable for experiments set vendor.gpp.create_frc_extension=1 and
+# install a matching GPP/FRC++ module (vendor.gppservice + libgpp* libs).
+# See docs/gpp-frc-status.md for the full investigation.
+PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+    vendor.gpp.create_frc_extension=0 \
+    vendor.gpp.allgame.enable=0
+
 # Inherit from proprietary targets
 $(call inherit-product, vendor/nubia/tiro/tiro-vendor.mk)

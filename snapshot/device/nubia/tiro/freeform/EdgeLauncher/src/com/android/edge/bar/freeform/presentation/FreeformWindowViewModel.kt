@@ -15,6 +15,7 @@
  */
 package com.android.edge.bar.freeform.presentation
 
+import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -134,6 +135,9 @@ class FreeformWindowViewModel(
             val currentState = stateManager.state.value
             val displayId = currentState.displayId
             if (displayId != Display.INVALID_DISPLAY && displayId > 0) {
+                // Keep the injector in sync with the current virtual display;
+                // a stale id silently drops every touch after a resize/recreate.
+                inputInjector.setDisplayId(displayId)
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     val (displayWidth, displayHeight) = stateManager.getAppSurfaceDimensions(
                         windowWidth = currentState.width,
@@ -166,7 +170,7 @@ class FreeformWindowViewModel(
         val token = (repository as? FreeformRepositoryImpl)?.getAppToken()
             ?: return Result.failure(IllegalStateException("Missing freeform app token"))
 
-        val targetDensity = config.densityDpi
+        val targetDensity = config.densityForWidth(width)
 
         textureViewRef?.let { view ->
             view.surfaceTexture?.setDefaultBufferSize(width, height)
@@ -198,11 +202,10 @@ class FreeformWindowViewModel(
             val dm = context.getSystemService(DisplayManager::class.java)
             val display = dm?.getDisplay(Display.DEFAULT_DISPLAY)
 
-            display?.supportedModes
-                ?.maxByOrNull { it.refreshRate }
-                ?.refreshRate
-                ?: display?.refreshRate
-                ?: 60f
+            listOfNotNull(
+                display?.refreshRate,
+                display?.supportedModes?.maxByOrNull { it.refreshRate }?.refreshRate,
+            ).maxOrNull() ?: 60f
         } catch (e: Exception) {
             Log.w(TAG, "Failed to resolve target refresh rate", e)
             60f
@@ -522,12 +525,37 @@ class FreeformWindowViewModel(
             try {
                 val intent = Intent(Intent.ACTION_MAIN).apply {
                     component = ComponentName(packageName, activityName)
+                    // A fresh task is required: CLEAR_TOP/SINGLE_TOP reuses the
+                    // freeform ActivityRecord, which keeps the virtual display's
+                    // scaled density (145/206) after the task is moved to the
+                    // default display, so the app UI stays too large. Reusing it
+                    // also makes ActivityStarter abort our launch options.
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 }
-                context.startActivity(intent)
+                // makeScaleUpAnimation already adds the source view's
+                // on-screen location; passing it again as startX/startY offsets
+                // the animation twice and puts it outside the display.
+                val source = overlayView
+                val options = if (source != null && source.isAttachedToWindow) {
+                    ActivityOptions.makeScaleUpAnimation(
+                        source,
+                        0,
+                        0,
+                        source.width.coerceAtLeast(1),
+                        source.height.coerceAtLeast(1),
+                    )
+                } else {
+                    ActivityOptions.makeBasic()
+                }
+                options.setLaunchDisplayId(Display.DEFAULT_DISPLAY)
+                context.startActivity(intent, options.toBundle())
                 Log.i(TAG, "Launched $packageName/$activityName in fullscreen")
+
+                // Keep the overlay alive until the scale-up animation has
+                // finished. Closing it in finally made the window disappear
+                // first and the app pop in with no visible transition.
+                delay(450)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to launch activity in fullscreen", e)
             } finally {

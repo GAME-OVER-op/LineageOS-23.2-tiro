@@ -262,8 +262,13 @@ class FreeformRepositoryImpl(
 
     private fun getRefreshRate(id: Int): Float {
         val display = displayManager.getDisplay(id)
-        return display?.supportedModes
-            ?.maxByOrNull { it.refreshRate }
-            ?.refreshRate ?: display?.refreshRate ?: 60f
+            ?: displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+        // Prefer the mode the user actually selected; supportedModes can still
+        // report a lower ceiling when a refresh-rate setting is applied later.
+        val rates = listOfNotNull(
+            display?.refreshRate,
+            display?.supportedModes?.maxByOrNull { it.refreshRate }?.refreshRate,
+        )
+        return rates.maxOrNull() ?: 60f
     }
 }

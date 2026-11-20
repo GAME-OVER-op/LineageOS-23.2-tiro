@@ -163,10 +163,13 @@ public final class AppVolumeController {
         final AppState newState = oldState.withVolume(clampedVolume);
         mActiveStates.put(key, newState);
 
+        // Re-apply to every tracked player, including ones that are not in
+        // STARTED state right now (e.g. between tracks). A new player created
+        // for the next track needs the saved multiplier before it starts.
         final List<AudioPlaybackConfiguration> players = mActivePlayers.get(key);
         if (players != null) {
             for (AudioPlaybackConfiguration config : players) {
-                applyVolume(config, clampedVolume, true);
+                applyVolume(config, clampedVolume);
             }
         }
         dispatchSnapshot();
@@ -185,7 +188,16 @@ public final class AppVolumeController {
 
         if (configs != null) {
             for (AudioPlaybackConfiguration config : configs) {
-                if (!isEligible(config)) {
+                // Track *all* app players, not only ones currently in
+                // PLAYER_STATE_STARTED with a media usage. When a music app
+                // switches tracks, the replacement player first shows up as
+                // IDLE with USAGE_UNKNOWN; skipping it here meant the saved
+                // per-app multiplier was never applied and the next track
+                // played at full volume. The master volume key happened to
+                // trigger another callback when the player was STARTED, which
+                // is why pressing it "restored" the volume.
+                final int uid = config.getClientUid();
+                if (UserHandle.getAppId(uid) < Process.FIRST_APPLICATION_UID) {
                     continue;
                 }
 
@@ -194,18 +206,23 @@ public final class AppVolumeController {
                     continue;
                 }
 
-                final int uid = config.getClientUid();
-                activePids.add(config.getClientPid());
                 final int userId = UserHandle.getUserId(uid);
                 final String key = makeKey(userId, packageName);
                 final int volume = getSavedVolume(key);
 
+                activePids.add(config.getClientPid());
                 activePlayers.computeIfAbsent(key, unused -> new ArrayList<>()).add(config);
-                activeStates.putIfAbsent(
-                        key, new AppState(key, packageName, uid, userId, volume));
-
                 activePlayerIds.add(config.getPlayerInterfaceId());
-                applyVolume(config, volume, false);
+
+                // Apply to every player, including IDLE/USAGE_UNKNOWN ones.
+                applyVolume(config, volume);
+
+                // UI visibility stays restricted to genuinely playing media
+                // apps; isEligible() is only used for the slider list.
+                if (isEligible(config)) {
+                    activeStates.putIfAbsent(
+                            key, new AppState(key, packageName, uid, userId, volume));
+                }
             }
         }
 
@@ -245,19 +262,17 @@ public final class AppVolumeController {
                         mPreferences.getInt(PREF_PREFIX + key, DEFAULT_VOLUME)));
     }
 
-    private void applyVolume(
-            AudioPlaybackConfiguration config, int volume, boolean force) {
+    private void applyVolume(AudioPlaybackConfiguration config, int volume) {
         final int playerId = config.getPlayerInterfaceId();
-        final Integer lastApplied = mAppliedVolumeByPlayerId.get(playerId);
-        if (!force && lastApplied != null && lastApplied == volume) {
-            return;
-        }
-
         final PlayerProxy proxy = config.getPlayerProxy();
         if (proxy == null) {
             return;
         }
 
+        // Always (re-)apply the saved multiplier. The old "skip if already
+        // applied to this player id" check broke track switches: a reused
+        // player id kept its stale cached value and a replacement player was
+        // left at full volume. setVolume() is cheap and idempotent.
         try {
             proxy.setVolume(volumeToGain(volume));
             mAppliedVolumeByPlayerId.put(playerId, volume);

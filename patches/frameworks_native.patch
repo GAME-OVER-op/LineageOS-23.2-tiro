@@ -1,0 +1,192 @@
+diff --git a/libs/gui/Android.bp b/libs/gui/Android.bp
+index 449692cb62..ead7041cf2 100644
+--- a/libs/gui/Android.bp
++++ b/libs/gui/Android.bp
+@@ -326,6 +326,9 @@ filegroup {
+         "SurfaceControl.cpp",
+         "SurfaceComposerClient.cpp",
+         "SyncFeatures.cpp",
++
++        // GPP frame generation (Surface producer wrapper)
++        "QtiExtension/QtiSurfaceExtensionGPP.cpp",
+         "TransactionState.cpp",
+         "VsyncEventData.cpp",
+         "view/Surface.cpp",
+diff --git a/libs/gui/Surface.cpp b/libs/gui/Surface.cpp
+index cabc1773e0..8f44323e4c 100644
+--- a/libs/gui/Surface.cpp
++++ b/libs/gui/Surface.cpp
+@@ -19,10 +19,14 @@
+ //#define LOG_NDEBUG 0
+ 
+ #include <gui/Surface.h>
++#include "QtiExtension/QtiSurfaceExtensionGPP.h"
++
++#include <cutils/properties.h>
+ 
+ #include <condition_variable>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
+ #include <deque>
+ #include <mutex>
+ #include <thread>
+@@ -175,9 +179,19 @@ Surface::Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controll
+     mSwapIntervalZero = false;
+     mMaxBufferCount = NUM_BUFFER_SLOTS;
+     mSurfaceControlHandle = surfaceControlHandle;
++
++    // GPP frame generation: create the wrapper only when explicitly enabled.
++    char gppValue[PROPERTY_VALUE_MAX];
++    property_get("vendor.gpp.create_frc_extension", gppValue, "0");
++    if (atoi(gppValue) == 1 &&
++            mQtiSurfaceGPPExtn == nullptr) {
++        mQtiSurfaceGPPExtn = std::make_shared<libguiextension::QtiSurfaceExtensionGPP>(
++                this, IGraphicBufferProducer::asBinder(bufferProducer), &mGraphicBufferProducer);
++    }
+ }
+ 
+ Surface::~Surface() {
++    mQtiSurfaceGPPExtn = nullptr;
+     if (mConnectedToCpu) {
+         Surface::disconnect(NATIVE_WINDOW_API_CPU);
+     }
+@@ -213,6 +227,9 @@ sp<IGraphicBufferProducer> Surface::getIGraphicBufferProducer() const {
+ 
+ void Surface::setSidebandStream(const sp<NativeHandle>& stream) {
+     mGraphicBufferProducer->setSidebandStream(stream);
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->setSidebandStream(stream);
++    }
+ }
+ 
+ void Surface::allocateBuffers() {
+@@ -670,6 +687,10 @@ int Surface::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
+     }
+     SURF_LOGV("Surface::dequeueBuffer");
+ 
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
++    }
++
+     IGraphicBufferProducer::DequeueBufferInput dqInput;
+     {
+         Mutex::Autolock lock(mMutex);
+@@ -849,6 +870,10 @@ int Surface::dequeueBuffers(std::vector<BatchBuffer>* buffers) {
+     ATRACE_CALL();
+     SURF_LOGV("Surface::dequeueBuffers");
+ 
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
++    }
++
+     if (buffers->size() == 0) {
+         SURF_LOGE("%s: must dequeue at least 1 buffer!", __FUNCTION__);
+         return BAD_VALUE;
+@@ -1385,6 +1410,10 @@ int Surface::queueBuffer(sp<GraphicBuffer>&& buffer, int fenceFd,
+             SURF_LOGE("queueBuffer: error queuing buffer, %d", err);
+         }
+ 
++        if (mQtiSurfaceGPPExtn) {
++            mQtiSurfaceGPPExtn->setQueuedBufferSlot(slot);
++        }
++
+         onBufferQueuedLocked(slot, fence, output);
+     }
+ 
+@@ -1600,6 +1629,9 @@ int Surface::query(int what, int* value) const {
+             }
+         }
+     }
++    if (mQtiSurfaceGPPExtn && mQtiSurfaceGPPExtn->IsGPPEnabled()) {
++        return mQtiSurfaceGPPExtn->query(what, value);
++    }
+     return mGraphicBufferProducer->query(what, value);
+ }
+ 
+@@ -2156,6 +2188,10 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
+     IGraphicBufferProducer::QueueBufferOutput output;
+     mReportRemovedBuffers = reportBufferRemoval;
+ 
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->Connect(api, &mGraphicBufferProducer);
++    }
++
+     if (listener != nullptr) {
+         mListenerProxy = sp<ProducerListenerProxy>::make(wp<Surface>::fromExisting(this), listener);
+     }
+@@ -2180,6 +2216,10 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
+ 
+         mConsumerRunningBehind = (output.numPendingBuffers >= 2);
+ 
++        if (mQtiSurfaceGPPExtn) {
++            mQtiSurfaceGPPExtn->StoreConnect(api, mListenerProxy, reportBufferRemoval);
++        }
++
+ #if !defined(NO_BINDER)
+         if (listener && listener->needsDeathNotify()) {
+             mSurfaceDeathListener = sp<ProducerDeathListenerProxy>::make(listener);
+@@ -2211,6 +2251,9 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
+ int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
+     ATRACE_CALL();
+     SURF_LOGV("Surface::disconnect");
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->Disconnect(api, &mGraphicBufferProducer);
++    }
+     int err = mGraphicBufferProducer->disconnect(api, mode);
+     if (err == BAD_VALUE) {
+         SURF_LOGE("Surface failed to disconnect with error %d (%s). Likely the wrong API was "
+@@ -2407,6 +2450,9 @@ int Surface::setBufferCount(int bufferCount)
+     ATRACE_CALL();
+     SURF_LOGV("Surface::setBufferCount");
+     Mutex::Autolock lock(mMutex);
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->setBufferCount(bufferCount);
++    }
+ 
+     status_t err = NO_ERROR;
+     if (bufferCount == 0) {
+@@ -3046,6 +3092,9 @@ status_t Surface::setFrameRate(float frameRate, int8_t compatibility,
+                                                         changeFrameRateStrategy);
+     SURF_LOGE_IF(err, "IGraphicBufferProducer::setFrameRate(%.2f) returned %s", frameRate,
+                  strerror(-err));
++    if (mQtiSurfaceGPPExtn) {
++        mQtiSurfaceGPPExtn->setFrameRate(frameRate, compatibility, changeFrameRateStrategy);
++    }
+     return err;
+ }
+ 
+diff --git a/libs/gui/include/gui/Surface.h b/libs/gui/include/gui/Surface.h
+index 9a6e75c333..bb9957bd21 100644
+--- a/libs/gui/include/gui/Surface.h
++++ b/libs/gui/include/gui/Surface.h
+@@ -31,6 +31,7 @@
+ #include <utils/RefBase.h>
+ #include <utils/String8.h>
+ 
++#include <memory>
+ #include <shared_mutex>
+ #include <unordered_set>
+ 
+@@ -38,6 +39,10 @@ namespace android {
+ 
+ class GraphicBuffer;
+ 
++namespace libguiextension {
++class QtiSurfaceExtensionGPP;
++} // namespace libguiextension
++
+ namespace gui {
+ class FrameTimelineInfo;
+ class ISurfaceComposer;
+@@ -295,6 +300,10 @@ private:
+     Surface& operator = (const Surface& rhs);
+     Surface(const Surface& rhs);
+ 
++    // GPP frame generation: wraps IGraphicBufferProducer for whitelisted games.
++    friend class libguiextension::QtiSurfaceExtensionGPP;
++    std::shared_ptr<libguiextension::QtiSurfaceExtensionGPP> mQtiSurfaceGPPExtn = nullptr;
++
+     // ANativeWindow hooks
+     static int hook_cancelBuffer(ANativeWindow* window,
+             ANativeWindowBuffer* buffer, int fenceFd);

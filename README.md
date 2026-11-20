@@ -1,39 +1,59 @@
 # LineageOS 23.2 — Nubia Red Magic 9 Pro (tiro)
 
-Custom LineageOS 23.2 source state for Nubia Red Magic 9 Pro / NX769J.
+Custom LineageOS 23.2 source state for Nubia Red Magic 9 Pro / NX769J (SM8650 / tiro).
 
 Maintainer: GAME_OVER_op
 
-This repository contains the custom source changes used to build:
+This repository contains the complete custom source state used to build the current ROM. It is a
+plain "snapshot" repository (not an AOSP `repo` checkout): all locally modified and added source
+files are stored verbatim under `snapshot/`, binary patches (HEAD -> working tree) under `patches/`,
+and restore metadata/scripts under `metadata/` and `scripts/`.
 
-lineage-23.2-20261028-UNOFFICIAL-tiro.zip
+## Restore
 
-The repository contains:
+```bash
+git clone https://github.com/GAME-OVER-op/LineageOS-23.2-tiro.git
+cd LineageOS-23.2-tiro
+# after syncing a clean LineageOS 23.2 tree for tiro:
+./scripts/apply-changes.sh /path/to/android-source
+cd /path/to/android-source && ./build.sh
+```
 
-- exact pinned Android manifest;
-- complete copies of all locally modified and added files;
-- binary Git patches for tracked changes;
-- complete DTS:X Ultra payload;
-- compiled DTS libraries and databases;
-- Freeform/EdgeLauncher integration;
-- custom SystemUI volume implementation;
-- Launcher overview changes;
-- device and common Nubia changes;
-- audio HAL changes;
-- SELinux changes;
-- ABL payload;
-- LTE+ carrier configuration;
-- restore and build scripts.
+`apply-changes.sh` copies `snapshot/` on top of the clean AOSP checkout. `scripts/build.sh` runs
+`lunch lineage_tiro-bp3a-userdebug && m bacon -j12` (adjust thread count as needed).
 
-The DTS directory is intentionally stored completely and is not stripped of
-compiled libraries or binary tuning databases.
+## What is included
 
-Firmware SHA256:
+- exact pinned Android manifest (`manifest-pinned.xml`);
+- complete copies of every modified/added source file under `snapshot/`;
+- per-project binary patches under `patches/` (from the base commits in `metadata/base-revisions.tsv`);
+- modified device/common Nubia trees, including the restored **Nubia Settings** app
+  (fan/cooler, RGB lighting, hardware triggers) and its native services under
+  `snapshot/device/nubia/sm8650-common/parts/` and `.../hardware/`;
+- **Freeform / EdgeLauncher** integration (virtual-display based floating windows,
+  smooth scale-up fullscreen expansion and DPI restoration) under
+  `snapshot/device/nubia/tiro/freeform/`;
+- custom SystemUI per-app volume implementation (AppVolumeController + dialog sliders/binder);
+- Launcher3 overview freeform action;
+- audio HAL / DTS:X Ultra changes, SELinux changes, ABL payload, LTE+ carrier config;
+- compiled binaries that have **no source** are included verbatim (not stripped) under
+  `snapshot/prebuilts/`:
+  - GPP / FRC++ module binaries (`gppservice`, `libgpp*.so`, `libMotionEngine*.so`,
+    `libgui.so`, VPP/HEXLP NDK libs, `gpp_app_list`, rc/seccomp policy) from
+    `snapshot/prebuilts/gpp/`;
+  - stock NX809J GPP libraries for reference under `snapshot/prebuilts/nubia-stock/lib64/`;
+  - DTS:X Ultra prebuilt APK/JAR/databases under `snapshot/vendor/nubia/tiro/dtsx/`.
 
-b274c5ac8762bee3444c3a1f1030241234ab62b138ab5ef47f799465fd6f1242
+## Note on GPP / FRC++ frame generation
 
-The firmware archive is slightly larger than GitHub's 2 GiB per-release-asset
-limit. The Release therefore contains two byte-for-byte parts.
+The ROM-side GPP extension sources are present, but frame generation is **disabled by default**
+(`vendor.gpp.create_frc_extension=0` in `snapshot/device/nubia/tiro/device.mk`) because the Qualcomm
+VPP usecase on tiro cannot actually start interpolation (`ConfigureDynamic() ... ret=7`,
+`fastrpc_get_info_from_dsp ... -111`). Full investigation, reproduction steps and rationale are in
+`snapshot/device/nubia/tiro/docs/gpp-frc-status.md`. Nothing was deleted — set the prop to 1 and
+install a matching GPP module to re-enable for experiments.
 
-To restore the original ZIP, concatenate part 00 and part 01 in numerical
-order and verify the SHA256 above before flashing.
+## Firmware / OTA
+
+The ROM ZIP is not stored in Git. The reference stock Nubia OTA used for GPP analysis is on the
+build host under `/mnt/axion-build/nubia-fw/`.

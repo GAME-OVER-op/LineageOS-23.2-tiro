@@ -1,0 +1,877 @@
+diff --git a/audio/usecaseKvManager.xml b/audio/usecaseKvManager.xml
+index 9e9ef98..554b0ce 100644
+--- a/audio/usecaseKvManager.xml
++++ b/audio/usecaseKvManager.xml
+@@ -155,24 +155,9 @@
+         </stream>
+         <!-- Voice Call Record stream -->
+         <stream type="PAL_STREAM_VOICE_CALL_RECORD">
+-            <keys_and_values  Instance="1">
+-                <!-- STREAMTX - INCALL_RECORD -->
+-                <graph_kv key="0xB1000000" value="0xB100000C"/>
+-                <graph_kv key="0xAB000000" value="0x1"/>
+-            </keys_and_values>
+-            <keys_and_values  Instance="1" CustomConfig="voip_incall_record">
+-                <!-- STREAMTX - INCALL_RECORD -->
+-                <graph_kv key="0xB1000000" value="0xB100000C"/>
+-                <graph_kv key="0xAB000000" value="0x7"/>
+-            </keys_and_values>
+-            <keys_and_values  Instance="2">
++            <keys_and_values>
+                 <!-- STREAMTX - INCALL_RECORD -->
+                 <graph_kv key="0xB1000000" value="0xB100000C"/>
+-                <graph_kv key="0xAB000000" value="0x2"/>
+-            </keys_and_values>
+-            <keys_and_values  Instance="2" CustomConfig="voip_incall_record">
+-                <graph_kv key="0xB1000000" value="0xB100000C"/>
+-                <graph_kv key="0xAB000000" value="0x8"/>
+             </keys_and_values>
+         </stream>
+         <!-- Voice stream -->
+diff --git a/common.mk b/common.mk
+index 0e183fe..6304137 100644
+--- a/common.mk
++++ b/common.mk
+@@ -342,6 +342,18 @@ PRODUCT_PACKAGES += \
+ PRODUCT_BOOT_JARS += \
+     telephony-ext
+ 
++# Fan control
++PRODUCT_PACKAGES += \
++    nubia_fan_service
++
++# RGB lighting control
++PRODUCT_PACKAGES += \
++    nubia_lighting_service
++
++# Event-driven, per-app shoulder triggers
++PRODUCT_PACKAGES += \
++    nubia_trigger_service
++
+ # Thermal
+ PRODUCT_PACKAGES += \
+     android.hardware.thermal-service.qti
+diff --git a/gps/android/utils/Android.bp b/gps/android/utils/Android.bp
+index 2ac6dbf..5fdc110 100644
+--- a/gps/android/utils/Android.bp
++++ b/gps/android/utils/Android.bp
+@@ -32,5 +32,6 @@ cc_library_static {
+ cc_library_headers {
+ 
+     name: "liblocbatterylistener_headers",
++    vendor: true,
+     export_include_dirs: ["."],
+ }
+diff --git a/parts/AndroidManifest.xml b/parts/AndroidManifest.xml
+index cc70d69..2bb9580 100644
+--- a/parts/AndroidManifest.xml
++++ b/parts/AndroidManifest.xml
+@@ -10,8 +10,17 @@
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
++    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
++    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
++    <queries>
++        <intent>
++            <action android:name="android.intent.action.MAIN" />
++            <category android:name="android.intent.category.LAUNCHER" />
++        </intent>
++    </queries>
+ 
+     <application
++        android:name=".NubiaApplication"
+         android:icon="@mipmap/ic_launcher"
+         android:label="@string/device_settings_app_name"
+         android:persistent="true"
+@@ -76,6 +85,35 @@
+             </intent-filter>
+         </activity>
+ 
++        <activity android:name=".trigger.TriggerAppsActivity"
++            android:label="@string/trigger_apps_title"
++            android:exported="false" />
++        <activity android:name=".trigger.TriggerProfileActivity"
++            android:label="@string/trigger_profile_title"
++            android:exported="false" />
++        <service android:name=".trigger.TriggerEditorService"
++            android:exported="false" />
++
++        <activity
++            android:name=".lighting.LightingActivity"
++            android:label="@string/lighting_title"
++            android:exported="true">
++            <intent-filter>
++                <action android:name="org.lineageos.settings.LIGHTING_SETTINGS" />
++                <category android:name="android.intent.category.DEFAULT" />
++            </intent-filter>
++        </activity>
++
++        <service
++            android:name=".service.NubiaNotificationListener"
++            android:exported="true"
++            android:label="@string/notification_listener_label"
++            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
++            <intent-filter>
++                <action android:name="android.service.notification.NotificationListenerService" />
++            </intent-filter>
++        </service>
++
+         <service
+             android:name=".fan.FanTileService"
+             android:exported="true"
+diff --git a/parts/res/values/strings.xml b/parts/res/values/strings.xml
+index e0fc721..2f362d4 100644
+--- a/parts/res/values/strings.xml
++++ b/parts/res/values/strings.xml
+@@ -1,6 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <!--
+      SPDX-FileCopyrightText: 2025 The LineageOS Project
++     SPDX-FileCopyrightText: 2026 GAME-OVER-op
+      SPDX-License-Identifier: Apache-2.0
+ -->
+ <resources>
+@@ -13,11 +14,58 @@
+     <string name="fan_enable_title">Enable Fan</string>
+     <string name="fan_enable_summary">Turn the cooling fan on or off</string>
+     <string name="fan_speed_title">Fan Speed</string>
+-    <string name="fan_speed_summary">Adjust fan speed level</string>
++    <string name="fan_speed_summary">Adjust fan speed level in manual mode</string>
++    <string name="fan_mode_title">Fan mode</string>
++    <string name="fan_mode_manual">Manual</string>
++    <string name="fan_mode_auto">Automatic temperature curve</string>
++    <string name="fan_curve_title">Automatic fan curve</string>
++    <string name="fan_curve_summary">Set a temperature threshold for each fan speed</string>
++    <string name="fan_curve_dialog_title">Fan temperature curve</string>
++    <string name="fan_curve_dialog_message">The first level cannot be set below 32°C. Every next level must be at least 1°C higher than the previous level.</string>
++    <string name="fan_curve_speed">Speed %1$d</string>
++    <string name="fan_curve_temperature_unit">°C</string>
+ 
+     <!-- Trigger buttons -->
+     <string name="trigger_buttons_title">Trigger buttons</string>
+     <string name="trigger_buttons_summary">Enable or disable trigger buttons</string>
+     <string name="trigger_buttons_enable_title">Enable trigger buttons</string>
+     <string name="trigger_buttons_enable_summary">Allow trigger buttons to function normally</string>
++
++    <!-- Per-app shoulder triggers -->
++    <string name="trigger_apps_title">Applications</string>
++    <string name="trigger_apps_summary">Assign left and right triggers per app</string>
++    <string name="trigger_apps_loading">Loading installed apps…</string>
++    <string name="trigger_apps_empty">No launchable applications found</string>
++    <string name="trigger_profile_title">Trigger profile</string>
++    <string name="trigger_left">Left shoulder trigger</string>
++    <string name="trigger_right">Right shoulder trigger</string>
++    <string name="trigger_both">Both triggers</string>
++    <string name="trigger_save_profile">Save</string>
++    <string name="trigger_saved">Profile saved</string>
++    <string name="trigger_edit_coordinates">Set coordinates over the game</string>
++    <string name="trigger_reset_coordinates">Reset coordinates</string>
++    <string name="trigger_confirm_reset">Clear saved coordinates for the selected triggers? Other apps will not be affected.</string>
++    <string name="trigger_delete_profile">Delete profile</string>
++    <string name="trigger_confirm_delete">Delete this app’s trigger profile?</string>
++    <string name="trigger_overlay_permission">Allow Nubia Settings to display over other apps to edit trigger positions.</string>
++    <string name="trigger_unlaunchable">Cannot launch this application</string>
++    <string name="trigger_save_failed">Failed to save profile</string>
++    <string name="trigger_assigned">assigned</string>
++    <string name="trigger_unassigned">not assigned</string>
++    <string name="trigger_coord_summary">Left: %1$s  ·  Right: %2$s</string>
++    <string name="trigger_rotation_changed">Orientation changed. Reopen the editor.</string>
++    <string name="trigger_selected_apps_title">Configured applications</string>
++    <string name="trigger_add_apps_title">Add application</string>
++    <string name="trigger_no_selected_apps">No applications configured</string>
++    <string name="trigger_quick_configure">Configure</string>
++    <string name="trigger_disabled">disabled</string>
++    <string name="trigger_apps_search">Search applications</string>
++    <string name="trigger_apps_count">Applications: %1$d</string>
++    <string name="trigger_apps_hint">Choose an application to configure its shoulder triggers</string>
++    <string name="trigger_reset_short">Reset</string>
++    <string name="trigger_delete_short">Delete</string>
++    <string name="trigger_back">Back</string>
++    <string name="trigger_already_added">Added</string>
++    <string name="trigger_apps_no_matches">No applications match your search</string>
++    <string name="trigger_return_failed">Unable to return to trigger settings. Open Nubia Settings manually.</string>
+ </resources>
+diff --git a/parts/res/xml/fan_preferences.xml b/parts/res/xml/fan_preferences.xml
+index 624e700..3a9b5a4 100644
+--- a/parts/res/xml/fan_preferences.xml
++++ b/parts/res/xml/fan_preferences.xml
+@@ -1,6 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <!--
+      SPDX-FileCopyrightText: 2025 The LineageOS Project
++     SPDX-FileCopyrightText: 2026 GAME-OVER-op
+      SPDX-License-Identifier: Apache-2.0
+ -->
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+@@ -12,9 +13,22 @@
+         android:summary="@string/fan_enable_summary"
+         android:defaultValue="false" />
+ 
++    <ListPreference
++        android:key="fan_mode"
++        android:title="@string/fan_mode_title"
++        android:summary="%s"
++        android:entries="@array/fan_mode_entries"
++        android:entryValues="@array/fan_mode_values"
++        android:defaultValue="manual" />
++
+     <com.android.settingslib.widget.SliderPreference
+         android:key="fan_speed_level"
+         android:title="@string/fan_speed_title"
+         android:summary="@string/fan_speed_summary"
+         android:defaultValue="3" />
++
++    <org.lineageos.settings.fan.FanCurvePreference
++        android:key="fan_curve"
++        android:title="@string/fan_curve_title"
++        android:summary="@string/fan_curve_summary" />
+ </PreferenceScreen>
+diff --git a/parts/res/xml/nubia_preferences.xml b/parts/res/xml/nubia_preferences.xml
+index 8191201..0ea3211 100644
+--- a/parts/res/xml/nubia_preferences.xml
++++ b/parts/res/xml/nubia_preferences.xml
+@@ -21,4 +21,12 @@
+         android:title="@string/trigger_buttons_title">
+         <intent android:action="org.lineageos.settings.TRIGGER_SETTINGS" />
+     </Preference>
++
++    <Preference
++        android:key="lighting"
++        android:icon="@drawable/ic_lighting"
++        android:summary="@string/lighting_summary"
++        android:title="@string/lighting_title">
++        <intent android:action="org.lineageos.settings.LIGHTING_SETTINGS" />
++    </Preference>
+ </PreferenceScreen>
+diff --git a/parts/res/xml/trigger_preferences.xml b/parts/res/xml/trigger_preferences.xml
+index 1fbbd71..4c56c5a 100644
+--- a/parts/res/xml/trigger_preferences.xml
++++ b/parts/res/xml/trigger_preferences.xml
+@@ -1,8 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<!--
+-     SPDX-FileCopyrightText: 2025 The LineageOS Project
+-     SPDX-License-Identifier: Apache-2.0
+--->
++<!-- SPDX-License-Identifier: Apache-2.0 -->
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto">
+ 
+@@ -11,4 +8,13 @@
+         android:title="@string/trigger_buttons_enable_title"
+         android:summary="@string/trigger_buttons_enable_summary"
+         android:defaultValue="false" />
++
++    <PreferenceCategory
++        android:key="trigger_selected"
++        android:title="@string/trigger_selected_apps_title" />
++
++    <Preference
++        android:key="trigger_apps"
++        android:title="@string/trigger_add_apps_title"
++        android:summary="@string/trigger_apps_hint" />
+ </PreferenceScreen>
+diff --git a/parts/src/org/lineageos/settings/BootReceiver.kt b/parts/src/org/lineageos/settings/BootReceiver.kt
+index 26affd8..471ed60 100644
+--- a/parts/src/org/lineageos/settings/BootReceiver.kt
++++ b/parts/src/org/lineageos/settings/BootReceiver.kt
+@@ -8,15 +8,15 @@ package org.lineageos.settings
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
+-import org.lineageos.settings.fan.FanController
++import org.lineageos.settings.lighting.LightingRuntimeController
+ import org.lineageos.settings.trigger.TriggerController
+ 
+ class BootReceiver : BroadcastReceiver() {
+ 
+     override fun onReceive(context: Context, intent: Intent) {
+         if (Intent.ACTION_BOOT_COMPLETED == intent.action) {
+-            FanController.restoreSettings(context)
+             TriggerController.restoreSettings(context)
++            LightingRuntimeController.initialize(context)
+         }
+     }
+ }
+diff --git a/parts/src/org/lineageos/settings/fan/FanController.kt b/parts/src/org/lineageos/settings/fan/FanController.kt
+index 558611a..3b0a610 100644
+--- a/parts/src/org/lineageos/settings/fan/FanController.kt
++++ b/parts/src/org/lineageos/settings/fan/FanController.kt
+@@ -1,60 +1,60 @@
+ /*
+  * SPDX-FileCopyrightText: 2025 The LineageOS Project
++ * SPDX-FileCopyrightText: 2026 GAME-OVER-op
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ package org.lineageos.settings.fan
+ 
+ import android.content.Context
+-import org.lineageos.settings.utils.*
+ 
+ object FanController {
+ 
+     const val KEY_FAN_ENABLE = "fan_enable"
+     const val KEY_FAN_SPEED = "fan_speed_level"
++    const val KEY_FAN_MODE = "fan_mode"
++    const val KEY_FAN_CURVE = "fan_curve"
+ 
+-    const val FAN_ENABLE_NODE = "/sys/kernel/fan/fan_enable"
+-    const val FAN_SPEED_NODE = "/sys/kernel/fan/fan_speed_level"
++    const val FAN_MIN_SPEED = FanConfigStore.MIN_SPEED
++    const val FAN_MAX_SPEED = FanConfigStore.MAX_SPEED
++    const val FAN_DEFAULT_SPEED = FanConfigStore.DEFAULT_SPEED
++    const val FAN_MODE_MANUAL = "manual"
++    const val FAN_MODE_AUTO = "auto"
++    const val FAN_MIN_CURVE_TEMP = FanConfigStore.MIN_CURVE_TEMP
++    const val FAN_MAX_CURVE_TEMP = FanConfigStore.MAX_CURVE_TEMP
+ 
+-    const val FAN_MIN_SPEED = 1
+-    const val FAN_MAX_SPEED = 5
+-    const val FAN_DEFAULT_SPEED = 3
++    fun isFanEnabled(context: Context): Boolean = FanConfigStore.load().enabled
++
++    fun getFanSpeed(context: Context): Int = FanConfigStore.load().manualLevel
++
++    fun getFanMode(context: Context): String = FanConfigStore.load().mode
++
++    fun getFanCurve(context: Context): IntArray = FanConfigStore.load().curve.copyOf()
+ 
+-    /*
+-     * Enable or disable the fan
+-     * @return puts the value in place
+-     */
+     fun setFanEnabled(context: Context, enabled: Boolean) {
+-        putInt(context, KEY_FAN_ENABLE, if (enabled) 1 else 0)
+-        writeLine(FAN_ENABLE_NODE, if (enabled) "1" else "0")
++        FanConfigStore.update { it.copy(enabled = enabled) }
+     }
+ 
+-    /*
+-     * Set the fan speed level
+-     * @return puts the value in place
+-     */
+     fun setFanSpeed(context: Context, speed: Int) {
+-        putInt(context, KEY_FAN_SPEED, speed)
+-        writeLine(FAN_SPEED_NODE, speed.toString())
++        FanConfigStore.update { it.copy(manualLevel = speed.coerceIn(FAN_MIN_SPEED, FAN_MAX_SPEED)) }
+     }
+ 
+-    /*
+-     * Apply both fan state and speed settings
+-     * @return puts the value in place
+-     */
+-    fun applySettings(context: Context, enabled: Boolean, speed: Int) {
+-        setFanEnabled(context, enabled)
+-        setFanSpeed(context, speed)
++    fun setFanMode(context: Context, mode: String) {
++        FanConfigStore.update {
++            it.copy(mode = if (mode == FAN_MODE_AUTO) FAN_MODE_AUTO else FAN_MODE_MANUAL)
++        }
+     }
+ 
+-    /*
+-     * Restore settings on boot / resume
+-     * @return puts the value in place
+-     */
+-    fun restoreSettings(context: Context) {
+-        val fanEnabled = getInt(context, KEY_FAN_ENABLE, 0) == 1
+-        val fanSpeed = getInt(context, KEY_FAN_SPEED, FAN_DEFAULT_SPEED)
++    fun setFanCurve(context: Context, curve: IntArray) {
++        FanConfigStore.update { it.copy(curve = FanConfigStore.normalizeCurve(curve)) }
++    }
+ 
+-        applySettings(context, fanEnabled, fanSpeed)
++    fun applySettings(context: Context, enabled: Boolean, speed: Int) {
++        FanConfigStore.update {
++            it.copy(
++                enabled = enabled,
++                manualLevel = speed.coerceIn(FAN_MIN_SPEED, FAN_MAX_SPEED),
++            )
++        }
+     }
+ }
+diff --git a/parts/src/org/lineageos/settings/fan/FanFragment.kt b/parts/src/org/lineageos/settings/fan/FanFragment.kt
+index 1fcfa0d..ded5500 100644
+--- a/parts/src/org/lineageos/settings/fan/FanFragment.kt
++++ b/parts/src/org/lineageos/settings/fan/FanFragment.kt
+@@ -1,29 +1,32 @@
+ /*
+  * SPDX-FileCopyrightText: 2025 The LineageOS Project
++ * SPDX-FileCopyrightText: 2026 GAME-OVER-op
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ package org.lineageos.settings.fan
+ 
+ import android.os.Bundle
++import androidx.preference.ListPreference
+ import androidx.preference.Preference
+ import com.android.settingslib.widget.MainSwitchPreference
+ import com.android.settingslib.widget.SettingsBasePreferenceFragment
+ import com.android.settingslib.widget.SliderPreference
+ import org.lineageos.settings.R
+-import org.lineageos.settings.utils.*
+ 
+ class FanFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceChangeListener {
+ 
+     private lateinit var mSwitchBar: MainSwitchPreference
+     private lateinit var mFanSpeedBar: SliderPreference
++    private lateinit var mFanMode: ListPreference
++    private lateinit var mFanCurve: FanCurvePreference
+ 
+     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+         addPreferencesFromResource(R.xml.fan_preferences)
+ 
+-        val fanEnabled = getInt(requireContext(), FanController.KEY_FAN_ENABLE, 0) == 1
+-        val savedSpeed =
+-            getInt(requireContext(), FanController.KEY_FAN_SPEED, FanController.FAN_DEFAULT_SPEED)
++        val fanEnabled = FanController.isFanEnabled(requireContext())
++        val savedSpeed = FanController.getFanSpeed(requireContext())
++        val savedMode = FanController.getFanMode(requireContext())
+ 
+         mSwitchBar =
+             findPreference<MainSwitchPreference>(FanController.KEY_FAN_ENABLE)!!.apply {
+@@ -31,6 +34,13 @@ class FanFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceCha
+                 onPreferenceChangeListener = this@FanFragment
+             }
+ 
++        mFanMode =
++            findPreference<ListPreference>(FanController.KEY_FAN_MODE)!!.apply {
++                value = savedMode
++                isEnabled = fanEnabled
++                onPreferenceChangeListener = this@FanFragment
++            }
++
+         mFanSpeedBar =
+             findPreference<SliderPreference>(FanController.KEY_FAN_SPEED)!!.apply {
+                 setMin(FanController.FAN_MIN_SPEED)
+@@ -38,31 +48,44 @@ class FanFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceCha
+                 setSliderIncrement(1)
+                 setValue(savedSpeed)
+                 setShowSliderValue(true)
+-                isEnabled = fanEnabled
+                 onPreferenceChangeListener = this@FanFragment
+             }
++
++        mFanCurve =
++            findPreference<FanCurvePreference>(FanController.KEY_FAN_CURVE)!!.apply {
++                isEnabled = fanEnabled && savedMode == FanController.FAN_MODE_AUTO
++            }
++
++        updateModeState(savedMode, fanEnabled)
++    }
++
++    private fun updateModeState(mode: String, fanEnabled: Boolean = mSwitchBar.isChecked) {
++        val automatic = mode == FanController.FAN_MODE_AUTO
++        mFanMode.isEnabled = fanEnabled
++        mFanSpeedBar.isVisible = !automatic
++        mFanCurve.isVisible = automatic
++        mFanSpeedBar.isEnabled = fanEnabled && !automatic
++        mFanCurve.isEnabled = fanEnabled && automatic
+     }
+ 
+     override fun onPreferenceChange(preference: Preference, newValue: Any): Boolean {
+         return when (preference.key) {
+             FanController.KEY_FAN_ENABLE -> {
+-                val isEnabled = newValue as Boolean
+-                val speed =
+-                    getInt(
+-                        requireContext(),
+-                        FanController.KEY_FAN_SPEED,
+-                        FanController.FAN_DEFAULT_SPEED,
+-                    )
+-
+-                mFanSpeedBar.isEnabled = isEnabled
+-                FanController.applySettings(requireContext(), isEnabled, speed)
++                val enabled = newValue as Boolean
++                FanController.setFanEnabled(requireContext(), enabled)
++                updateModeState(mFanMode.value ?: FanController.FAN_MODE_MANUAL, enabled)
+                 true
+             }
+ 
+             FanController.KEY_FAN_SPEED -> {
+-                val speed = newValue as Int
++                FanController.setFanSpeed(requireContext(), newValue as Int)
++                true
++            }
+ 
+-                FanController.setFanSpeed(requireContext(), speed)
++            FanController.KEY_FAN_MODE -> {
++                val mode = newValue as String
++                FanController.setFanMode(requireContext(), mode)
++                updateModeState(mode)
+                 true
+             }
+ 
+diff --git a/parts/src/org/lineageos/settings/fan/FanTileService.kt b/parts/src/org/lineageos/settings/fan/FanTileService.kt
+index b78ce85..9be45e0 100644
+--- a/parts/src/org/lineageos/settings/fan/FanTileService.kt
++++ b/parts/src/org/lineageos/settings/fan/FanTileService.kt
+@@ -1,5 +1,6 @@
+ /*
+  * SPDX-FileCopyrightText: 2025 The LineageOS Project
++ * SPDX-FileCopyrightText: 2026 GAME-OVER-op
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+@@ -7,7 +8,6 @@ package org.lineageos.settings.fan
+ 
+ import android.service.quicksettings.Tile
+ import android.service.quicksettings.TileService
+-import org.lineageos.settings.utils.*
+ 
+ class FanTileService : TileService() {
+ 
+@@ -18,18 +18,19 @@ class FanTileService : TileService() {
+ 
+     override fun onClick() {
+         super.onClick()
+-        val currentState = getInt(this, FanController.KEY_FAN_ENABLE, 0) == 1
+-
+-        FanController.setFanEnabled(this, !currentState)
+-
++        FanController.setFanEnabled(this, !FanController.isFanEnabled(this))
+         updateQsState()
+     }
+ 
+     private fun updateQsState() {
+-        val isFanEnabled = getInt(this, FanController.KEY_FAN_ENABLE, 0) == 1
+-
+         qsTile
+-            .apply { state = if (isFanEnabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE }
++            .apply {
++                state = if (FanController.isFanEnabled(this@FanTileService)) {
++                    Tile.STATE_ACTIVE
++                } else {
++                    Tile.STATE_INACTIVE
++                }
++            }
+             .updateTile()
+     }
+ }
+diff --git a/parts/src/org/lineageos/settings/trigger/TriggerController.kt b/parts/src/org/lineageos/settings/trigger/TriggerController.kt
+index fb4e39b..3c8a4bd 100644
+--- a/parts/src/org/lineageos/settings/trigger/TriggerController.kt
++++ b/parts/src/org/lineageos/settings/trigger/TriggerController.kt
+@@ -12,43 +12,16 @@ object TriggerController {
+ 
+     const val KEY_TRIGGER_ENABLE = "trigger_enable"
+ 
+-    const val TRIGGER_BUTTON1_ENABLE_NODE = "/proc/nubia_key/sar0/mode_operation"
+-    const val TRIGGER_BUTTON2_ENABLE_NODE = "/proc/nubia_key/sar1/mode_operation"
+-
+-    const val TRIGGER_SLEEP_MODE = "2"
+-    const val TRIGGER_WAKE_MODE = "1"
+-
+-    /*
+-     * Enable or disable the trigger buttons
+-     * @return puts the value in place
+-     */
++    /** Hardware sysfs is owned solely by the native trigger service. */
+     fun setTriggerEnabled(context: Context, enabled: Boolean) {
+         putInt(context, KEY_TRIGGER_ENABLE, if (enabled) 1 else 0)
+-        writeLine(
+-            TRIGGER_BUTTON1_ENABLE_NODE,
+-            if (enabled) TRIGGER_WAKE_MODE else TRIGGER_SLEEP_MODE,
+-        )
+-        writeLine(
+-            TRIGGER_BUTTON2_ENABLE_NODE,
+-            if (enabled) TRIGGER_WAKE_MODE else TRIGGER_SLEEP_MODE,
+-        )
++        TriggerRuntimeController.publish()
+     }
+ 
+-    /*
+-     * Apply trigger buttons state settings
+-     * @return puts the value in place
+-     */
+-    fun applySettings(context: Context, enabled: Boolean) {
+-        setTriggerEnabled(context, enabled)
+-    }
++    fun applySettings(context: Context, enabled: Boolean) = setTriggerEnabled(context, enabled)
+ 
+-    /*
+-     * Restore settings on boot / resume
+-     * @return puts the value in place
+-     */
+     fun restoreSettings(context: Context) {
+-        val triggerEnabled = getInt(context, KEY_TRIGGER_ENABLE, 0) == 1
+-
+-        applySettings(context, triggerEnabled)
++        TriggerRuntimeController.initialize(context)
++        TriggerRuntimeController.publish()
+     }
+ }
+diff --git a/parts/src/org/lineageos/settings/trigger/TriggerFragment.kt b/parts/src/org/lineageos/settings/trigger/TriggerFragment.kt
+index 0d8eade..9b7cacb 100644
+--- a/parts/src/org/lineageos/settings/trigger/TriggerFragment.kt
++++ b/parts/src/org/lineageos/settings/trigger/TriggerFragment.kt
+@@ -2,40 +2,153 @@
+  * SPDX-FileCopyrightText: 2025 The LineageOS Project
+  * SPDX-License-Identifier: Apache-2.0
+  */
+-
+ package org.lineageos.settings.trigger
+ 
++import android.app.AlertDialog
++import android.content.Intent
+ import android.os.Bundle
+ import androidx.preference.Preference
++import androidx.preference.PreferenceCategory
++import androidx.preference.PreferenceViewHolder
++import android.widget.ImageView
++import android.widget.TextView
++import android.widget.Toast
+ import com.android.settingslib.widget.MainSwitchPreference
+ import com.android.settingslib.widget.SettingsBasePreferenceFragment
+ import org.lineageos.settings.R
+ import org.lineageos.settings.utils.*
+ 
+ class TriggerFragment : SettingsBasePreferenceFragment(), Preference.OnPreferenceChangeListener {
+-
+     private lateinit var mSwitchBar: MainSwitchPreference
++    private lateinit var selectedCategory: PreferenceCategory
+ 
+     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+         addPreferencesFromResource(R.xml.trigger_preferences)
++        mSwitchBar = findPreference<MainSwitchPreference>(TriggerController.KEY_TRIGGER_ENABLE)!!.apply {
++            setChecked(getInt(requireContext(), TriggerController.KEY_TRIGGER_ENABLE, 0) == 1)
++            onPreferenceChangeListener = this@TriggerFragment
++        }
++        selectedCategory = findPreference<PreferenceCategory>("trigger_selected")!!
++        findPreference<Preference>("trigger_apps")?.setOnPreferenceClickListener {
++            startActivity(Intent(requireContext(), TriggerAppsActivity::class.java))
++            true
++        }
++    }
+ 
+-        val triggerEnabled = getInt(requireContext(), TriggerController.KEY_TRIGGER_ENABLE, 0) == 1
++    override fun onResume() {
++        super.onResume()
++        if (::mSwitchBar.isInitialized) {
++            mSwitchBar.setChecked(getInt(requireContext(), TriggerController.KEY_TRIGGER_ENABLE, 0) == 1)
++        }
++        if (::selectedCategory.isInitialized) showSelectedProfiles()
++    }
+ 
+-        mSwitchBar =
+-            findPreference<MainSwitchPreference>(TriggerController.KEY_TRIGGER_ENABLE)!!.apply {
+-                setChecked(triggerEnabled)
+-                onPreferenceChangeListener = this@TriggerFragment
+-            }
++    private fun showSelectedProfiles() {
++        val context = requireContext()
++        selectedCategory.removeAll()
++        val profiles = TriggerProfileStore.load().sortedBy { profile ->
++            try { context.packageManager.getApplicationLabel(
++                context.packageManager.getApplicationInfo(profile.pkg, 0)).toString() }
++            catch (_: Exception) { profile.pkg }
++        }
++        if (profiles.isEmpty()) {
++            selectedCategory.addPreference(Preference(context).apply {
++                title = context.getString(R.string.trigger_no_selected_apps)
++                isEnabled = false
++                isIconSpaceReserved = false
++            })
++            return
++        }
++        profiles.forEach { profile ->
++            val label = try {
++                context.packageManager.getApplicationLabel(
++                    context.packageManager.getApplicationInfo(profile.pkg, 0)).toString()
++            } catch (_: Exception) { profile.pkg }
++            selectedCategory.addPreference(object : Preference(context) {
++                init {
++                    key = "trigger_profile_${profile.pkg}"
++                    layoutResource = R.layout.trigger_selected_profile
++                    isSelectable = false
++                    isIconSpaceReserved = false
++                }
++                override fun onBindViewHolder(holder: PreferenceViewHolder) {
++                    super.onBindViewHolder(holder)
++                    holder.itemView.findViewById<ImageView>(R.id.trigger_selected_icon).setImageDrawable(
++                        try { context.packageManager.getApplicationIcon(profile.pkg) }
++                        catch (_: Exception) { null }
++                    )
++                    holder.itemView.findViewById<TextView>(R.id.trigger_selected_name).text = label
++                    holder.itemView.findViewById<TextView>(R.id.trigger_selected_state).text =
++                        context.getString(R.string.trigger_coord_summary,
++                            bindingStatus(profile.left), bindingStatus(profile.right))
++                    holder.itemView.findViewById<TextView>(R.id.trigger_selected_configure)
++                        .setOnClickListener { openProfile(profile.pkg) }
++                    holder.itemView.findViewById<TextView>(R.id.trigger_selected_reset)
++                        .setOnClickListener { showResetMenu(profile.pkg) }
++                    holder.itemView.findViewById<TextView>(R.id.trigger_selected_delete)
++                        .setOnClickListener { confirmDelete(profile.pkg) }
++                }
++            })
++        }
++    }
++
++    private fun bindingStatus(binding: TriggerProfileStore.Binding): String = when {
++        !binding.enabled -> getString(R.string.trigger_disabled)
++        binding.valid -> getString(R.string.trigger_assigned)
++        else -> getString(R.string.trigger_unassigned)
++    }
++
++    private fun openProfile(pkg: String) {
++        startActivity(Intent(requireContext(), TriggerProfileActivity::class.java)
++            .putExtra(TriggerProfileActivity.EXTRA_PACKAGE, pkg))
++    }
++
++    private fun showSaveFailure() {
++        Toast.makeText(requireContext(), R.string.trigger_save_failed, Toast.LENGTH_SHORT).show()
++    }
++
++    private fun showResetMenu(pkg: String) {
++        AlertDialog.Builder(requireContext())
++            .setTitle(R.string.trigger_reset_coordinates)
++            .setItems(arrayOf(getString(R.string.trigger_left),
++                getString(R.string.trigger_right), getString(R.string.trigger_both))) { _, selection ->
++                AlertDialog.Builder(requireContext())
++                    .setMessage(R.string.trigger_confirm_reset)
++                    .setNegativeButton(android.R.string.cancel, null)
++                    .setPositiveButton(R.string.trigger_reset_coordinates) { _, _ ->
++                        val profile = TriggerProfileStore.get(pkg)
++                        val updated = profile.copy(
++                            left = if (selection == 0 || selection == 2)
++                                profile.left.copy(valid = false) else profile.left,
++                            right = if (selection == 1 || selection == 2)
++                                profile.right.copy(valid = false) else profile.right,
++                        )
++                        if (TriggerProfileStore.put(updated)) {
++                            TriggerRuntimeController.publish()
++                            showSelectedProfiles()
++                        } else showSaveFailure()
++                    }.show()
++            }.show()
++    }
++
++    private fun confirmDelete(pkg: String) {
++        AlertDialog.Builder(requireContext())
++            .setMessage(R.string.trigger_confirm_delete)
++            .setNegativeButton(android.R.string.cancel, null)
++            .setPositiveButton(R.string.trigger_delete_profile) { _, _ ->
++                if (TriggerProfileStore.delete(pkg)) {
++                    TriggerRuntimeController.publish()
++                    showSelectedProfiles()
++                } else showSaveFailure()
++            }.show()
+     }
+ 
+     override fun onPreferenceChange(preference: Preference, newValue: Any): Boolean {
+         return when (preference.key) {
+             TriggerController.KEY_TRIGGER_ENABLE -> {
+-                val isEnabled = newValue as Boolean
+-                TriggerController.setTriggerEnabled(requireContext(), isEnabled)
++                TriggerController.setTriggerEnabled(requireContext(), newValue as Boolean)
+                 true
+             }
+-
+             else -> false
+         }
+     }
+diff --git a/rootdir/etc/init.qcom.rc b/rootdir/etc/init.qcom.rc
+index 1f4ed64..1154fb4 100644
+--- a/rootdir/etc/init.qcom.rc
++++ b/rootdir/etc/init.qcom.rc
+@@ -520,6 +520,17 @@ on post-fs-data
+     chmod 664 /sys/kernel/fan/fan_enable
+     chmod 664 /sys/kernel/fan/fan_speed_count
+     chmod 664 /sys/kernel/fan/fan_speed_level
++
++    # NX769J AW22xxx RGB controller. Hardware writes are owned by the native
++    # nubia_lighting_service; NubiaParts never accesses these nodes directly.
++    chown system system /sys/class/leds/aw22xxx_led/effect
++    chown system system /sys/class/leds/aw22xxx_led/cfg
++    chown system system /sys/class/leds/aw22xxx_led/hwen
++    chown system system /sys/class/leds/aw22xxx_led/brightness
++    chmod 0660 /sys/class/leds/aw22xxx_led/effect
++    chmod 0660 /sys/class/leds/aw22xxx_led/cfg
++    chmod 0660 /sys/class/leds/aw22xxx_led/hwen
++    chmod 0660 /sys/class/leds/aw22xxx_led/brightness
+     # Nubia add end
+ 	
+ 
+diff --git a/rro_overlays/CarrierConfigResCommon_Sys/res/xml/vendor.xml b/rro_overlays/CarrierConfigResCommon_Sys/res/xml/vendor.xml
+index 2fb94ed..569568b 100644
+--- a/rro_overlays/CarrierConfigResCommon_Sys/res/xml/vendor.xml
++++ b/rro_overlays/CarrierConfigResCommon_Sys/res/xml/vendor.xml
+@@ -3328,6 +3328,9 @@
+         <boolean name="carrier_vt_available_bool" value="false" />
+         <boolean name="carrier_wfc_ims_available_bool" value="true" />
+     </carrier_config>
++    <carrier_config mcc="250" mnc="54">
++        <boolean name="hide_lte_plus_data_icon_bool" value="false" />
++    </carrier_config>
+     <carrier_config mcc="250">
+         <boolean name="carrier_wfc_ims_available_bool" value="true" />
+         <boolean name="carrier_default_wfc_ims_enabled_bool" value="true" />
+diff --git a/sepolicy/private/devicesettings_app.te b/sepolicy/private/devicesettings_app.te
+index aed1f21..f5d8066 100644
+--- a/sepolicy/private/devicesettings_app.te
++++ b/sepolicy/private/devicesettings_app.te
+@@ -5,5 +5,27 @@ allow devicesettings_app {
+     app_api_service
+ }:service_manager find;
+ 
+-rw_dir_file(devicesettings_app, sysfs_fan)
+-rw_dir_file(devicesettings_app, proc_touchkey)
++# Nubia fan configuration is event-driven. The app only updates the persistent
++# configuration file; the native service owns all sysfs fan access.
++allow devicesettings_app system_data_file:dir search;
++allow devicesettings_app nubia_fan_data_file:dir create_dir_perms;
++allow devicesettings_app nubia_fan_data_file:file create_file_perms;
++
++# Nubia lighting configuration/runtime state is event driven. NubiaParts never
++# accesses AW22xxx sysfs directly.
++allow devicesettings_app nubia_lighting_data_file:dir create_dir_perms;
++allow devicesettings_app nubia_lighting_data_file:file create_file_perms;
++
++
++# Settings publishes event snapshots and per-app trigger profiles.
++allow devicesettings_app nubia_trigger_data_file:dir create_dir_perms;
++allow devicesettings_app nubia_trigger_data_file:file create_file_perms;
++
++# The data directories can stay labeled system_data_file when init cannot
++# relabel them from system_ext rc. Keep a fallback so configuration writes
++# never silently fail in that case.
++allow devicesettings_app system_data_file:dir { open read write search add_name remove_name create getattr setattr };
++allow devicesettings_app system_data_file:file { open read write create rename unlink getattr setattr append };
++
++# Exempt from system_data_file write neverallow (see system/private/attributes).
++typeattribute devicesettings_app nubia_data_writer;
+diff --git a/sepolicy/private/file.te b/sepolicy/private/file.te
+index c8bcd5e..998d1a9 100644
+--- a/sepolicy/private/file.te
++++ b/sepolicy/private/file.te
+@@ -1,5 +1,16 @@
+ # Fan control
+ type sysfs_fan, fs_type, sysfs_type;
++type nubia_fan_service_exec, exec_type, file_type, system_file_type;
++type nubia_fan_data_file, file_type, data_file_type, core_data_file_type;
++
++# RGB lighting control
++type sysfs_tiro_rgb, fs_type, sysfs_type;
++type nubia_lighting_service_exec, exec_type, file_type, system_file_type;
++type nubia_lighting_data_file, file_type, data_file_type, core_data_file_type;
+ 
+ # Trigger buttons
+ type proc_touchkey, fs_type, proc_type;
++
++# Native two-trigger touch merger
++type nubia_trigger_service_exec, exec_type, file_type, system_file_type;
++type nubia_trigger_data_file, file_type, data_file_type, core_data_file_type;
+diff --git a/sepolicy/private/genfs_contexts b/sepolicy/private/genfs_contexts
+index 209f909..3472719 100644
+--- a/sepolicy/private/genfs_contexts
++++ b/sepolicy/private/genfs_contexts
+@@ -5,3 +5,6 @@ genfscon sysfs /kernel/fan/fan_speed_level    u:object_r:sysfs_fan:s0
+ # Trigger buttons
+ genfscon proc /nubia_key/sar0/mode_operation    u:object_r:proc_touchkey:s0
+ genfscon proc /nubia_key/sar1/mode_operation    u:object_r:proc_touchkey:s0
++
++# NX769J AW22xxx RGB controller
++genfscon sysfs /devices/platform/soc/9c0000.qcom,qupv3_i2c_geni_se/98c000.i2c/i2c-0/0-006a/leds/aw22xxx_led u:object_r:sysfs_tiro_rgb:s0
