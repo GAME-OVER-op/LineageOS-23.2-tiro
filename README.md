@@ -59,3 +59,33 @@ install a matching GPP module to re-enable for experiments.
 
 The ROM ZIP is not stored in Git. The reference stock Nubia OTA used for GPP analysis is on the
 build host under `/mnt/axion-build/nubia-fw/`.
+
+## Build configuration: use the stable `bp3a` release
+
+**Always build this device with the stable release:**
+
+```bash
+lunch lineage_tiro-bp3a-userdebug
+m bacon -j16
+```
+
+Do **not** use `lunch lineage_tiro trunk_staging userdebug`. The `trunk_staging` release is a
+developer-preview build and produces the following properties:
+
+| | `bp3a` (stable, correct) | `trunk_staging` (preview, broken) |
+| --- | --- | --- |
+| `ro.build.version.codename` | `REL` | `Baklava` |
+| `ro.build.version.preview_sdk` | `0` | `1` |
+| `ro.build.version.sdk_full` | `36.0` | `36.1` |
+
+LSPosed / ZygiskNext (LSPlant) breaks on the preview variant: during app start via zygote's
+`forkSimpleApps` it fails with
+`NoSuchMethodError: DexFile.<init>(ByteBuffer[], ClassLoader, Element[])`,
+`Failed to init lsplant` and then SIGSEGVs in `zygisk_lsposed/zygisk/arm64-v8a.so`, killing the
+app process. LSPlant selects its ART hook strategy by version properties and picks the wrong
+branch on a preview/codename build. The `DexFile` constructor itself is present in both ROMs and
+the ART files are byte-identical to the build output, so this is a version-detection issue,
+not ROM corruption — rebuilding with the same `trunk_staging` target will not fix it.
+
+The 2026-11-21 clean rebuild (`clean-bp3a-20261120-225523`) was made with `bp3a` and is the
+first published build with this correction.
