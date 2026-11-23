@@ -589,6 +589,12 @@ class FreeformStateManager(
                 y = targetY,
                 width = targetWidth,
                 height = targetHeight,
+                // Keep the saved form in sync with the visible one. Otherwise
+                // minimize/expand restores an older size and recomputes a
+                // different density for the same window ("loses the previous
+                // form/DPI" when switching back and forth).
+                savedWidth = targetWidth,
+                savedHeight = targetHeight,
                 isPaused = true
             )
         }
@@ -619,6 +625,8 @@ class FreeformStateManager(
                 y = targetY,
                 width = targetWidth,
                 height = targetHeight,
+                savedWidth = targetWidth,
+                savedHeight = targetHeight,
                 isPaused = true
             )
         }
@@ -649,6 +657,8 @@ class FreeformStateManager(
                 y = targetY,
                 width = targetWidth,
                 height = targetHeight,
+                savedWidth = targetWidth,
+                savedHeight = targetHeight,
                 isPaused = true
             )
         }

@@ -160,7 +160,11 @@ class FreeformWindowViewModel(
         }
     }
 
-    private suspend fun resizeVirtualDisplay(width: Int, height: Int): Result<Unit> {
+    private suspend fun resizeVirtualDisplay(
+        width: Int,
+        height: Int,
+        force: Boolean = false
+    ): Result<Unit> {
         val currentState = stateManager.state.value
         val displayId = currentState.displayId
         if (displayId < 0) {
@@ -177,7 +181,15 @@ class FreeformWindowViewModel(
             inputInjector.setScale(view.width, view.height, width, height)
         }
 
-        if (appliedDisplayWidth == width &&
+        // The cached "applied" values only describe what WE last sent to the display.
+        // After a task is moved onto a freshly created display (returning from
+        // fullscreen) or a form change is reverted, the Activity can still be
+        // carrying the previous display's density even though these fields match
+        // the target. In those cases the resize must be forced so the new density
+        // is actually applied to the task; the early return would leave a
+        // too-large/too-small UI until the app is restarted.
+        if (!force &&
+                appliedDisplayWidth == width &&
                 appliedDisplayHeight == height &&
                 appliedDisplayDensityDpi == targetDensity) {
             val latestState = stateManager.state.value
@@ -432,6 +444,17 @@ class FreeformWindowViewModel(
                                     Log.i(TAG, "Moved task $taskId to display $displayId")
                                     delay(FreeformConstants.DELAY_SURFACE_SETTLE_MS)
                                     if (repository.isTaskOnDisplay(taskId, displayId)) {
+                                        // The task arrives from the default display carrying its
+                                        // fullscreen density. Our cached applied* fields still
+                                        // match the freshly created display, so a normal resize
+                                        // would be skipped and the app would keep the wrong UI
+                                        // scale. Force the density onto the moved task.
+                                        val latest = stateManager.state.value
+                                        resizeVirtualDisplay(
+                                            latest.width,
+                                            latest.height,
+                                            force = true,
+                                        )
                                         finishAttach(displayId, onDisplayReady)
                                     } else {
                                         failAttach("Moved task $taskId did not attach to display $displayId")
@@ -495,16 +518,7 @@ class FreeformWindowViewModel(
 
     fun destroy() {
         stateManager.destroy()
-        
-        val token = (repository as? FreeformRepositoryImpl)?.getAppToken()
-        token?.let {
-            val releaseScope = serviceScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            releaseScope.launch(NonCancellable) {
-                repository.releaseDisplay(it)
-                    .onSuccess { Log.i(TAG, "Display released successfully") }
-                    .onFailure { Log.e(TAG, "Failed to release display", it) }
-            }
-        }
+        releaseVirtualDisplay()
 
         displaySurface?.let {
             it.release()
@@ -516,6 +530,37 @@ class FreeformWindowViewModel(
         freeformWindowManager.unregisterWindow(packageName)
     }
 
+    /**
+     * Releases the virtual display exactly once. Both [destroy] and the
+     * fullscreen transition need this, and racing two releases (or releasing
+     * after a new window has already attached) left the moved task with a
+     * stale density. The caller that starts a fullscreen task must complete
+     * this before launching, so the Activity is never created while the
+     * scaled virtual display is still alive.
+     */
+    private var displayReleaseStarted = false
+
+    private suspend fun releaseVirtualDisplaySuspend() {
+        if (displayReleaseStarted) return
+        displayReleaseStarted = true
+        val token = (repository as? FreeformRepositoryImpl)?.getAppToken() ?: return
+        repository.releaseDisplay(token)
+            .onSuccess { Log.i(TAG, "Display released successfully") }
+            .onFailure { Log.e(TAG, "Failed to release display", it) }
+    }
+
+    private fun releaseVirtualDisplay() {
+        if (displayReleaseStarted) return
+        displayReleaseStarted = true
+        val token = (repository as? FreeformRepositoryImpl)?.getAppToken() ?: return
+        val releaseScope = serviceScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        releaseScope.launch(NonCancellable) {
+            repository.releaseDisplay(token)
+                .onSuccess { Log.i(TAG, "Display released successfully") }
+                .onFailure { Log.e(TAG, "Failed to release display", it) }
+        }
+    }
+
     fun register(window: FreeformWindowCompose) {
         freeformWindowManager.registerWindow(packageName, window)
     }
@@ -523,6 +568,13 @@ class FreeformWindowViewModel(
     fun launchFullscreen(onComplete: () -> Unit) {
         scope.launch {
             try {
+                // Release the scaled virtual display BEFORE starting the fullscreen
+                // task. Previously the task was launched first and destroy() released
+                // the display asynchronously; the Activity was created while a
+                // scaled-density display still existed and inherited a wrong UI
+                // scale (too small / too large) that survived even a restart.
+                releaseVirtualDisplaySuspend()
+
                 val intent = Intent(Intent.ACTION_MAIN).apply {
                     component = ComponentName(packageName, activityName)
                     // A fresh task is required: CLEAR_TOP/SINGLE_TOP reuses the

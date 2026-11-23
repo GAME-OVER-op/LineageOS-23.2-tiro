@@ -95,6 +95,40 @@ public final class AppVolumeController {
     private final Map<String, AppState> mActiveStates = new LinkedHashMap<>();
     private final Map<Integer, Integer> mAppliedVolumeByPlayerId = new HashMap<>();
     private final Map<Integer, String> mPackageByPid = new HashMap<>();
+    // The package name resolved for a given uid is not always stable. Some apps switch their
+    // playback to a different process (different pid) or share a uid with another package when
+    // starting the next track. In both cases the key derived from the package changes and the
+    // saved multiplier would be read as the default (100%). Keep a uid -> key mapping learned
+    // from the playback callbacks so a new package for the same uid still gets the saved level.
+    private final Map<Integer, String> mKeyByUid = new HashMap<>();
+    // Players are often created before a playback callback is dispatched. A setVolume() call
+    // on a player whose IPlayerShell is still being set up is silently dropped, which is why the
+    // next track plays at 100% until the next callback (e.g. pressing a volume key) re-applies it.
+    // Re-apply after a short delay for every player we have seen.
+    private final Set<Integer> mPendingReapplyPlayerIds = new HashSet<>();
+
+    private final Runnable mReapplyPendingRunnable = () -> {
+        if (!mStarted || mAudioManager == null) {
+            return;
+        }
+        final List<AudioPlaybackConfiguration> configs =
+                mAudioManager.getActivePlaybackConfigurations();
+        if (configs == null) {
+            return;
+        }
+        for (AudioPlaybackConfiguration config : configs) {
+            if (config == null || !mPendingReapplyPlayerIds.contains(
+                    config.getPlayerInterfaceId())) {
+                continue;
+            }
+            final int uid = config.getClientUid();
+            final String key = keyForConfig(uid, config);
+            if (key != null) {
+                applyVolume(config, getSavedVolume(key));
+            }
+        }
+        mPendingReapplyPlayerIds.clear();
+    };
 
     private boolean mStarted;
 
@@ -141,10 +175,13 @@ public final class AppVolumeController {
         }
         mStarted = false;
         mAudioManager.unregisterAudioPlaybackCallback(mPlaybackCallback);
+        mHandler.removeCallbacks(mReapplyPendingRunnable);
         mActivePlayers.clear();
         mActiveStates.clear();
         mAppliedVolumeByPlayerId.clear();
         mPackageByPid.clear();
+        mKeyByUid.clear();
+        mPendingReapplyPlayerIds.clear();
     }
 
     public void setAppVolume(@NonNull String key, int volume) {
@@ -162,6 +199,7 @@ public final class AppVolumeController {
 
         final AppState newState = oldState.withVolume(clampedVolume);
         mActiveStates.put(key, newState);
+        mKeyByUid.put(newState.uid, key);
 
         // Re-apply to every tracked player, including ones that are not in
         // STARTED state right now (e.g. between tracks). A new player created
@@ -170,6 +208,24 @@ public final class AppVolumeController {
         if (players != null) {
             for (AudioPlaybackConfiguration config : players) {
                 applyVolume(config, clampedVolume);
+            }
+        }
+        // The tracked list can be one callback behind the real state. Query fresh
+        // configurations so the new value is applied to players of this app that
+        // were created after the last callback (the exact track-switch case).
+        if (mAudioManager != null) {
+            final List<AudioPlaybackConfiguration> fresh =
+                    mAudioManager.getActivePlaybackConfigurations();
+            if (fresh != null) {
+                for (AudioPlaybackConfiguration config : fresh) {
+                    if (config == null) {
+                        continue;
+                    }
+                    final String configKey = keyForConfig(config.getClientUid(), config);
+                    if (key.equals(configKey)) {
+                        applyVolume(config, clampedVolume);
+                    }
+                }
             }
         }
         dispatchSnapshot();
@@ -193,33 +249,40 @@ public final class AppVolumeController {
                 // switches tracks, the replacement player first shows up as
                 // IDLE with USAGE_UNKNOWN; skipping it here meant the saved
                 // per-app multiplier was never applied and the next track
-                // played at full volume. The master volume key happened to
-                // trigger another callback when the player was STARTED, which
-                // is why pressing it "restored" the volume.
+                // played at full volume.
                 final int uid = config.getClientUid();
                 if (UserHandle.getAppId(uid) < Process.FIRST_APPLICATION_UID) {
                     continue;
                 }
 
-                final String packageName = resolvePackageName(config);
-                if (packageName == null || packageName.equals(mContext.getPackageName())) {
+                final String key = keyForConfig(uid, config);
+                if (key == null || key.equals(makeKey(UserHandle.getUserId(uid),
+                        mContext.getPackageName()))) {
                     continue;
                 }
 
                 final int userId = UserHandle.getUserId(uid);
-                final String key = makeKey(userId, packageName);
                 final int volume = getSavedVolume(key);
 
                 activePids.add(config.getClientPid());
                 activePlayers.computeIfAbsent(key, unused -> new ArrayList<>()).add(config);
                 activePlayerIds.add(config.getPlayerInterfaceId());
+                mKeyByUid.put(uid, key);
 
                 // Apply to every player, including IDLE/USAGE_UNKNOWN ones.
                 applyVolume(config, volume);
+                // A newly created player may not have its IPlayerShell ready yet, so the
+                // setVolume() above is dropped. Retry once from a fresh query shortly after.
+                if (config.getPlayerProxy() == null) {
+                    mPendingReapplyPlayerIds.add(config.getPlayerInterfaceId());
+                    mHandler.removeCallbacks(mReapplyPendingRunnable);
+                    mHandler.postDelayed(mReapplyPendingRunnable, 300);
+                }
 
                 // UI visibility stays restricted to genuinely playing media
                 // apps; isEligible() is only used for the slider list.
                 if (isEligible(config)) {
+                    final String packageName = resolvePackageName(config);
                     activeStates.putIfAbsent(
                             key, new AppState(key, packageName, uid, userId, volume));
                 }
@@ -227,12 +290,29 @@ public final class AppVolumeController {
         }
 
         mAppliedVolumeByPlayerId.keySet().retainAll(activePlayerIds);
+        mPendingReapplyPlayerIds.retainAll(activePlayerIds);
         mPackageByPid.keySet().retainAll(activePids);
         mActivePlayers.clear();
         mActivePlayers.putAll(activePlayers);
         mActiveStates.clear();
         mActiveStates.putAll(activeStates);
         dispatchSnapshot();
+    }
+
+    /**
+     * Returns the preference key for a player. Prefers the key learned earlier for this uid so a
+     * package/process change between tracks keeps using the saved level.
+     */
+    private String keyForConfig(int uid, AudioPlaybackConfiguration config) {
+        final String known = mKeyByUid.get(uid);
+        if (known != null) {
+            return known;
+        }
+        final String packageName = resolvePackageName(config);
+        if (packageName == null) {
+            return null;
+        }
+        return makeKey(UserHandle.getUserId(uid), packageName);
     }
 
     private boolean isEligible(AudioPlaybackConfiguration config) {

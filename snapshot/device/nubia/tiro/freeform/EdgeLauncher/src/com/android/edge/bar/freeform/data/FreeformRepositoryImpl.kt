@@ -169,11 +169,16 @@ class FreeformRepositoryImpl(
     ): Int = withContext(Dispatchers.IO) {
         try {
             activityTaskManager.getTasks(MAX_TASKS)
-                .firstOrNull { task ->
+                .filter { task ->
                     task.topActivity?.packageName == packageName ||
                             task.baseActivity?.packageName == packageName ||
                             task.baseIntent?.component?.packageName == packageName
                 }
+                // getTasks() is newest-first; take max taskId explicitly so a
+                // stale fullscreen copy can never win over the fresh one when
+                // returning from fullscreen. A stale task carries the old
+                // (scaled) density and makes the UI wrong until restart.
+                .maxByOrNull { it.taskId }
                 ?.taskId ?: INVALID_TASK_ID
         } catch (e: Exception) {
             Log.e(TAG, "Failed to find running task for $packageName/$activityName", e)

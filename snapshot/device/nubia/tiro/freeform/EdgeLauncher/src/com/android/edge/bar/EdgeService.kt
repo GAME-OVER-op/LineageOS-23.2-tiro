@@ -189,11 +189,14 @@ class EdgeService : Service() {
     private fun findRunningTaskId(packageName: String): Int {
         return try {
             activityTaskManager.getTasks(MAX_TASKS)
-                .firstOrNull { task ->
+                .filter { task ->
                     task.topActivity?.packageName == packageName ||
                         task.baseActivity?.packageName == packageName ||
                         task.baseIntent?.component?.packageName == packageName
                 }
+                // Prefer the newest task; stale fullscreen copies carry an old
+                // scaled density and produce a wrong-sized UI on return.
+                .maxByOrNull { it.taskId }
                 ?.taskId ?: INVALID_TASK_ID
         } catch (_: Exception) {
             INVALID_TASK_ID
