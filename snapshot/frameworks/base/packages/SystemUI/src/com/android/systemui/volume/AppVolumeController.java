@@ -95,6 +95,8 @@ public final class AppVolumeController {
     private final Map<String, AppState> mActiveStates = new LinkedHashMap<>();
     private final Map<Integer, Integer> mAppliedVolumeByPlayerId = new HashMap<>();
     private final Map<Integer, String> mPackageByPid = new HashMap<>();
+    // Declared before mReapplyPendingRunnable, whose initializer references it.
+    private boolean mStarted;
     // The package name resolved for a given uid is not always stable. Some apps switch their
     // playback to a different process (different pid) or share a uid with another package when
     // starting the next track. In both cases the key derived from the package changes and the
@@ -129,8 +131,6 @@ public final class AppVolumeController {
         }
         mPendingReapplyPlayerIds.clear();
     };
-
-    private boolean mStarted;
 
     private final AudioManager.AudioPlaybackCallback mPlaybackCallback =
             new AudioManager.AudioPlaybackCallback() {
