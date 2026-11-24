@@ -63,7 +63,12 @@ PRODUCT_PACKAGES += \
 # See docs/gpp-frc-status.md for the full investigation.
 PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
     vendor.gpp.create_frc_extension=0 \
-    vendor.gpp.allgame.enable=0
+    vendor.gpp.allgame.enable=0 \
+    dalvik.vm.dex2oat64.enabled=true
+
+# This is a 64-bit-only platform (no dex2oat32 in the ART APEX). core_64_bit.mk
+# (used for the stable bp3a release) does not set the flag that core_64_bit_only.mk
+# sets. Without it artd picks dex2oat32 and aborts with "No such file or directory".
 
 # Inherit from proprietary targets
 $(call inherit-product, vendor/nubia/tiro/tiro-vendor.mk)

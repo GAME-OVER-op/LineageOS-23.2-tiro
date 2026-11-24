@@ -89,3 +89,22 @@ not ROM corruption — rebuilding with the same `trunk_staging` target will not 
 
 The 2026-11-21 clean rebuild (`clean-bp3a-20261120-225523`) was made with `bp3a` and is the
 first published build with this correction.
+
+## Large camera resource (not stored in Git)
+
+The stock camera resources under `snapshot/vendor/nubia/tiro/proprietary/system/camera_profiles/`
+are included verbatim, except one file that exceeds GitHub's 100 MB per-file limit:
+
+```
+system/etc/portrait_segment/IDPhotoMattingCache.bin   (226 MB)
+```
+
+Download it from the release assets (`20261120`) and place it at:
+
+```
+vendor/nubia/tiro/proprietary/system/camera_profiles/system/etc/portrait_segment/IDPhotoMattingCache.bin
+```
+
+before building. Its SHA256 is recorded in the release notes; please verify it after download.
+All other camera model files (motion predictor, classifiers, tflite models, image styles,
+cartoon/cosmos filters) are present in the snapshot.

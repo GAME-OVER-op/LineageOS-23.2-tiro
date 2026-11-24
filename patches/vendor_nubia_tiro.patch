@@ -23,3 +23,20 @@ index 4a954a2..6ccb897 100644
      aop \
      aop_config \
      bluetooth \
+diff --git a/tiro-vendor.mk b/tiro-vendor.mk
+index 164d7b2..3a38314 100644
+--- a/tiro-vendor.mk
++++ b/tiro-vendor.mk
+@@ -5,6 +5,12 @@
+ PRODUCT_SOONG_NAMESPACES += \
+     vendor/nubia/tiro
+ 
++# Camera model resources from stock RedMagicOS 11.0.5MR1_GB (/system/etc):
++# motion predictor, scene classifier, portrait/tflite models, image styles,
++# cartoon/cosmos filters. Without them the corresponding camera modes are
++# unavailable. Installed verbatim, no source.
++PRODUCT_COPY_FILES += $(call find-copy-subdir-files,*,vendor/nubia/tiro/proprietary/system/camera_profiles/system/etc,$(TARGET_COPY_OUT_SYSTEM)/etc)
++
+ PRODUCT_COPY_FILES += \
+     vendor/nubia/tiro/proprietary/vendor/etc/acdbdata/pineapple_mtp/MTP_acdb_cal.acdb:$(TARGET_COPY_OUT_VENDOR)/etc/acdbdata/pineapple_mtp/MTP_acdb_cal.acdb \
+     vendor/nubia/tiro/proprietary/vendor/etc/acdbdata/pineapple_mtp/MTP_workspaceFileXml.qwsp:$(TARGET_COPY_OUT_VENDOR)/etc/acdbdata/pineapple_mtp/MTP_workspaceFileXml.qwsp \

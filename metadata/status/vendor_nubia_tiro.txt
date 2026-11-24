@@ -1,4 +1,6 @@
  M Android.mk
  M BoardConfigVendor.mk
+ M tiro-vendor.mk
 ?? dtsx/
+?? proprietary/system/camera_profiles/
 ?? radio/abl.img
