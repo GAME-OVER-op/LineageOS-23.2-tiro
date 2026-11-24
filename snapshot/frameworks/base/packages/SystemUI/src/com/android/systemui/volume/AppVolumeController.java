@@ -109,28 +109,8 @@ public final class AppVolumeController {
     // Re-apply after a short delay for every player we have seen.
     private final Set<Integer> mPendingReapplyPlayerIds = new HashSet<>();
 
-    private final Runnable mReapplyPendingRunnable = () -> {
-        if (!mStarted || mAudioManager == null) {
-            return;
-        }
-        final List<AudioPlaybackConfiguration> configs =
-                mAudioManager.getActivePlaybackConfigurations();
-        if (configs == null) {
-            return;
-        }
-        for (AudioPlaybackConfiguration config : configs) {
-            if (config == null || !mPendingReapplyPlayerIds.contains(
-                    config.getPlayerInterfaceId())) {
-                continue;
-            }
-            final int uid = config.getClientUid();
-            final String key = keyForConfig(uid, config);
-            if (key != null) {
-                applyVolume(config, getSavedVolume(key));
-            }
-        }
-        mPendingReapplyPlayerIds.clear();
-    };
+    // Initialized in the constructor, after the final fields it captures are assigned.
+    private final Runnable mReapplyPendingRunnable;
 
     private final AudioManager.AudioPlaybackCallback mPlaybackCallback =
             new AudioManager.AudioPlaybackCallback() {
@@ -149,6 +129,28 @@ public final class AppVolumeController {
         mActivityManager = context.getSystemService(ActivityManager.class);
         final Context storageContext = context.createDeviceProtectedStorageContext();
         mPreferences = storageContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        mReapplyPendingRunnable = () -> {
+            if (!mStarted || mAudioManager == null) {
+                return;
+            }
+            final List<AudioPlaybackConfiguration> configs =
+                    mAudioManager.getActivePlaybackConfigurations();
+            if (configs == null) {
+                return;
+            }
+            for (AudioPlaybackConfiguration config : configs) {
+                if (config == null || !mPendingReapplyPlayerIds.contains(
+                        config.getPlayerInterfaceId())) {
+                    continue;
+                }
+                final int uid = config.getClientUid();
+                final String key = keyForConfig(uid, config);
+                if (key != null) {
+                    applyVolume(config, getSavedVolume(key));
+                }
+            }
+            mPendingReapplyPlayerIds.clear();
+        };
     }
 
     public void start() {
