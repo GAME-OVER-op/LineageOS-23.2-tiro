@@ -89,6 +89,17 @@ internal object LightingRuntimeStore {
 
     fun setScreenOn(screenOn: Boolean) = update { it.copy(screenOn = screenOn) }
 
+    /**
+     * Screen state and the notification pulse must be written together: a split
+     * update could make the native service briefly light the LEDs on SCREEN_ON.
+     */
+    fun setScreenState(screenOn: Boolean) = update { state ->
+        state.copy(
+            screenOn = screenOn,
+            notificationActive = if (screenOn) false else state.notificationActive,
+        )
+    }
+
     fun setNotificationActive(active: Boolean) = update { it.copy(notificationActive = active) }
 
     private fun parseBool(value: String, fallback: Boolean): Boolean = when {

@@ -875,3 +875,19 @@ index 209f909..3472719 100644
 +
 +# NX769J AW22xxx RGB controller
 +genfscon sysfs /devices/platform/soc/9c0000.qcom,qupv3_i2c_geni_se/98c000.i2c/i2c-0/0-006a/leds/aw22xxx_led u:object_r:sysfs_tiro_rgb:s0
+diff --git a/rro_overlays/FrameworksResTarget_Vendor/res/values/config.xml b/rro_overlays/FrameworksResTarget_Vendor/res/values/config.xml
+index a19d811..42819af 100644
+--- a/rro_overlays/FrameworksResTarget_Vendor/res/values/config.xml
++++ b/rro_overlays/FrameworksResTarget_Vendor/res/values/config.xml
+@@ -582,4 +582,11 @@
+ 
+     <!-- Whether to enable fp unlock when screen turns off on udfps devices -->
+     <bool name="config_screen_off_udfps_enabled">true</bool>
++
++    <!-- Grant notification-listener access to Nubia Settings at boot, so its
++         event-driven notification lighting works without writing Secure settings
++         from the app (which NotificationManagerService does not treat as a grant). -->
++    <string name="config_defaultListenerAccessPackages" translatable="false">
++        org.lineageos.settings
++    </string>
+ </resources>

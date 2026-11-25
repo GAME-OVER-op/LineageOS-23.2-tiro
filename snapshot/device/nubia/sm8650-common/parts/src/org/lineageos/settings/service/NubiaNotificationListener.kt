@@ -11,50 +11,21 @@ import android.service.notification.StatusBarNotification
 import org.lineageos.settings.lighting.LightingRuntimeController
 
 class NubiaNotificationListener : NotificationListenerService() {
-    private val activeKeys = linkedSetOf<String>()
-    private var lastPublishedActive: Boolean? = null
 
-    override fun onListenerConnected() {
-        super.onListenerConnected()
-        activeKeys.clear()
-        activeNotifications.orEmpty()
-            .filter(::isEligible)
-            .forEach { activeKeys += it.key }
-        publishState()
-    }
-
+    // Event-driven: a newly posted notification starts the lighting pulse. We do not
+    // keep a set of "currently active" notifications, because a media notification
+    // that stays visible would otherwise hold the external LEDs on forever.
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (isEligible(sbn)) {
-            activeKeys += sbn.key
-        } else {
-            activeKeys -= sbn.key
-        }
-        publishState()
-    }
-
-    override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        activeKeys -= sbn.key
-        publishState()
+        if (isEligible(sbn)) LightingRuntimeController.onNotificationPosted()
     }
 
     override fun onListenerDisconnected() {
-        activeKeys.clear()
-        publishState()
+        LightingRuntimeController.onListenerDisconnected()
         super.onListenerDisconnected()
     }
 
-    private fun publishState() {
-        val active = activeKeys.isNotEmpty()
-        if (lastPublishedActive == active) return
-        lastPublishedActive = active
-        LightingRuntimeController.setNotificationActive(active)
-    }
-
     private fun isEligible(sbn: StatusBarNotification): Boolean {
-        val notification = sbn.notification
-        return sbn.isClearable &&
-            sbn.packageName != packageName &&
-            notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 &&
-            notification.flags and Notification.FLAG_ONGOING_EVENT == 0
+        if (sbn.packageName == packageName) return false
+        return sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0
     }
 }

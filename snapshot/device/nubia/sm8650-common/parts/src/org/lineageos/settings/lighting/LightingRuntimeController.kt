@@ -6,22 +6,12 @@
 package org.lineageos.settings.lighting
 
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
-import android.service.notification.NotificationListenerService
-import android.util.Log
-import org.lineageos.settings.service.NubiaNotificationListener
 
 object LightingRuntimeController {
-    private const val TAG = "LightingRuntimeController"
-    private const val ENABLED_NOTIFICATION_LISTENERS = "enabled_notification_listeners"
-
     @Volatile
     private var initialized = false
 
@@ -30,8 +20,8 @@ object LightingRuntimeController {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_ON -> LightingRuntimeStore.setScreenOn(true)
-                Intent.ACTION_SCREEN_OFF -> LightingRuntimeStore.setScreenOn(false)
+                Intent.ACTION_SCREEN_ON -> LightingRuntimeStore.setScreenState(true)
+                Intent.ACTION_SCREEN_OFF -> LightingRuntimeStore.setScreenState(false)
             }
         }
     }
@@ -41,7 +31,6 @@ object LightingRuntimeController {
         if (initialized) {
             LightingController.ensureInitialized()
             syncScreenState()
-            ensureNotificationListenerAccess()
             return
         }
         appContext = context.applicationContext
@@ -54,57 +43,29 @@ object LightingRuntimeController {
             addAction(Intent.ACTION_SCREEN_OFF)
         }
         appContext.registerReceiver(screenReceiver, filter, Context.RECEIVER_EXPORTED)
-        ensureNotificationListenerAccess()
         initialized = true
     }
 
-    fun setNotificationActive(active: Boolean) {
-        LightingRuntimeStore.setNotificationActive(active)
+    /**
+     * Called from NubiaNotificationListener on every newly posted notification.
+     *
+     * Notification lighting is a short pulse that only makes sense with the screen off.
+     * The native nubia_lighting_service owns the actual sysfs write and watches
+     * runtime.conf, so there is no polling of the notification service here.
+     */
+    fun onNotificationPosted() {
+        if (!initialized) return
+        val powerManager = appContext.getSystemService(PowerManager::class.java)
+        if (powerManager.isInteractive) return
+        LightingRuntimeStore.setNotificationActive(true)
     }
 
+    fun onListenerDisconnected() {
+        if (initialized) LightingRuntimeStore.setNotificationActive(false)
+    }
 
     private fun syncScreenState() {
-        LightingRuntimeStore.setScreenOn(
-            appContext.getSystemService(PowerManager::class.java).isInteractive,
-        )
-    }
-
-    private fun ensureNotificationListenerAccess() {
-        runCatching {
-            val component = ComponentName(appContext, NubiaNotificationListener::class.java)
-            val flattened = component.flattenToString()
-            val resolver = appContext.contentResolver
-            val current = Settings.Secure.getString(
-                resolver,
-                ENABLED_NOTIFICATION_LISTENERS,
-            ).orEmpty()
-            val listeners = current
-                .split(':')
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .toMutableSet()
-
-            if (listeners.add(flattened) &&
-                !Settings.Secure.putString(
-                    resolver,
-                    ENABLED_NOTIFICATION_LISTENERS,
-                    listeners.joinToString(":"),
-                )
-            ) {
-                Log.w(TAG, "Unable to grant notification-listener access")
-            }
-
-            NotificationListenerService.requestRebind(component)
-            // The system observes the secure setting asynchronously. A second
-            // rebind after a short delay makes access reliable on first boot.
-            Handler(Looper.getMainLooper()).postDelayed({
-                runCatching { NotificationListenerService.requestRebind(component) }
-                    .onFailure { error ->
-                        Log.w(TAG, "Unable to rebind notification listener", error)
-                    }
-            }, 2000)
-        }.onFailure { error ->
-            Log.w(TAG, "Unable to initialize notification-listener access", error)
-        }
+        val interactive = appContext.getSystemService(PowerManager::class.java).isInteractive
+        LightingRuntimeStore.setScreenState(interactive)
     }
 }
