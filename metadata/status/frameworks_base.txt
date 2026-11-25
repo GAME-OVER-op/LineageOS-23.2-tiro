@@ -3,6 +3,7 @@
  M packages/SystemUI/res/layout/volume_dialog_horizontal.xml
  M packages/SystemUI/res/values-ru/strings.xml
  M packages/SystemUI/res/values/strings.xml
+ M packages/SystemUI/src/com/android/systemui/CameraAvailabilityListener.kt
  M packages/SystemUI/src/com/android/systemui/volume/VolumeDialogImpl.java
  M packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialogPlugin.kt
  M packages/SystemUI/src/com/android/systemui/volume/dialog/sliders/ui/VolumeDialogSlidersViewBinder.kt

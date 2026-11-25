@@ -1569,3 +1569,25 @@ index a184d6a7efe8..08434f3fb0a4 100644
              if (mFactoryTestMode == FactoryTest.FACTORY_TEST_LOW_LEVEL) {
                  Slog.i(TAG, "No Bluetooth Service (factory test)");
              } else if (!context.getPackageManager().hasSystemFeature
+diff --git a/packages/SystemUI/src/com/android/systemui/CameraAvailabilityListener.kt b/packages/SystemUI/src/com/android/systemui/CameraAvailabilityListener.kt
+index 7af37bd720e3..c69944972097 100644
+--- a/packages/SystemUI/src/com/android/systemui/CameraAvailabilityListener.kt
++++ b/packages/SystemUI/src/com/android/systemui/CameraAvailabilityListener.kt
+@@ -42,11 +42,15 @@ class CameraAvailabilityListener(
+     private val availabilityCallback: CameraManager.AvailabilityCallback =
+         object : CameraManager.AvailabilityCallback() {
+             override fun onCameraClosed(logicalCameraId: String) {
+-                openCamera = null
++                // Another camera may still be active; do not lose the state of the
++                // protected camera when an unrelated camera is closed.
++                if (openCamera?.logicalCameraId == logicalCameraId) {
++                    openCamera = null
++                }
+                 if (activeProtectionInfo?.logicalCameraId == logicalCameraId) {
++                    activeProtectionInfo = null
+                     notifyCameraInactive()
+                 }
+-                activeProtectionInfo = null
+             }
+ 
+             override fun onCameraOpened(logicalCameraId: String, packageId: String) {
