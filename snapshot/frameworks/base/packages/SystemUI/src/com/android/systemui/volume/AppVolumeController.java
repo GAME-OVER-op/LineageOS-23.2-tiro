@@ -27,6 +27,7 @@ import android.media.AudioPlaybackConfiguration;
 import android.media.PlayerProxy;
 import android.os.Handler;
 import android.os.Process;
+import android.provider.Settings;
 import android.os.UserHandle;
 import android.util.Log;
 
@@ -42,21 +43,21 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Tracks application playback sessions and applies a persistent per-application volume multiplier.
+ * Tracks application playback sessions and provides a persistent per-application volume level.
  *
- * <p>The multiplier is applied through {@link PlayerProxy#setVolume(float)}. PlayerBase treats that
- * value as an independent multiplier, so applications can continue changing their own player
- * volume without overwriting the SystemUI app-volume value.</p>
+ * <p>The multiplier itself is applied by AudioService when a player is registered
+ * ({@code PlaybackActivityMonitor.trackPlayer}). Applying it at registration means a replacement
+ * player created for the next track gets the saved gain before it can play a single frame, so
+ * there is no loud->quiet transition and no need for delayed re-apply hacks. The level is stored
+ * in {@link Settings.Secure} keyed by uid so system_server can read it synchronously. PlayerProxy
+ * is used here only to update players that are already active when the user moves the slider.</p>
  */
 public final class AppVolumeController {
     private static final String TAG = "AppVolumeController";
     private static final String PREFS_NAME = "app_volume_levels";
     private static final String PREF_PREFIX = "volume:";
+    static final String SETTING_PREFIX = "app_volume_";
     private static final int DEFAULT_VOLUME = 100;
-    // Perceptual gain curve. A linear amplitude mapping makes the upper half of the slider
-    // sound almost flat, especially with dynamics-heavy effects such as DTS. 2.2 keeps 100%
-    // bit-for-bit at unity while giving the middle/lower range useful audible separation.
-    private static final double GAIN_CURVE_EXPONENT = 2.2d;
 
     public interface Listener {
         void onAppVolumesChanged(@NonNull List<AppState> apps);
@@ -87,30 +88,16 @@ public final class AppVolumeController {
     private final AudioManager mAudioManager;
     private final PackageManager mPackageManager;
     private final ActivityManager mActivityManager;
-    private final SharedPreferences mPreferences;
+    private final SharedPreferences mLegacyPrefs;
     private final Listener mListener;
 
     private final Map<String, List<AudioPlaybackConfiguration>> mActivePlayers =
             new LinkedHashMap<>();
     private final Map<String, AppState> mActiveStates = new LinkedHashMap<>();
-    private final Map<Integer, Integer> mAppliedVolumeByPlayerId = new HashMap<>();
     private final Map<Integer, String> mPackageByPid = new HashMap<>();
-    // Declared before mReapplyPendingRunnable, whose initializer references it.
-    private boolean mStarted;
-    // The package name resolved for a given uid is not always stable. Some apps switch their
-    // playback to a different process (different pid) or share a uid with another package when
-    // starting the next track. In both cases the key derived from the package changes and the
-    // saved multiplier would be read as the default (100%). Keep a uid -> key mapping learned
-    // from the playback callbacks so a new package for the same uid still gets the saved level.
     private final Map<Integer, String> mKeyByUid = new HashMap<>();
-    // Players are often created before a playback callback is dispatched. A setVolume() call
-    // on a player whose IPlayerShell is still being set up is silently dropped, which is why the
-    // next track plays at 100% until the next callback (e.g. pressing a volume key) re-applies it.
-    // Re-apply after a short delay for every player we have seen.
-    private final Set<Integer> mPendingReapplyPlayerIds = new HashSet<>();
 
-    // Initialized in the constructor, after the final fields it captures are assigned.
-    private final Runnable mReapplyPendingRunnable;
+    private boolean mStarted;
 
     private final AudioManager.AudioPlaybackCallback mPlaybackCallback =
             new AudioManager.AudioPlaybackCallback() {
@@ -128,29 +115,7 @@ public final class AppVolumeController {
         mPackageManager = context.getPackageManager();
         mActivityManager = context.getSystemService(ActivityManager.class);
         final Context storageContext = context.createDeviceProtectedStorageContext();
-        mPreferences = storageContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        mReapplyPendingRunnable = () -> {
-            if (!mStarted || mAudioManager == null) {
-                return;
-            }
-            final List<AudioPlaybackConfiguration> configs =
-                    mAudioManager.getActivePlaybackConfigurations();
-            if (configs == null) {
-                return;
-            }
-            for (AudioPlaybackConfiguration config : configs) {
-                if (config == null || !mPendingReapplyPlayerIds.contains(
-                        config.getPlayerInterfaceId())) {
-                    continue;
-                }
-                final int uid = config.getClientUid();
-                final String key = keyForConfig(uid, config);
-                if (key != null) {
-                    applyVolume(config, getSavedVolume(key));
-                }
-            }
-            mPendingReapplyPlayerIds.clear();
-        };
+        mLegacyPrefs = storageContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
     public void start() {
@@ -158,9 +123,8 @@ public final class AppVolumeController {
             return;
         }
         mStarted = true;
+        migrateLegacyLevels();
 
-        // Use the platform API instead of shell/settings commands. AudioService persists this in
-        // Settings.System and ignores the request when multi-audio focus is already enabled.
         try {
             mAudioManager.setMultiAudioFocusEnabled(true);
         } catch (RuntimeException e) {
@@ -177,57 +141,62 @@ public final class AppVolumeController {
         }
         mStarted = false;
         mAudioManager.unregisterAudioPlaybackCallback(mPlaybackCallback);
-        mHandler.removeCallbacks(mReapplyPendingRunnable);
         mActivePlayers.clear();
         mActiveStates.clear();
-        mAppliedVolumeByPlayerId.clear();
         mPackageByPid.clear();
         mKeyByUid.clear();
-        mPendingReapplyPlayerIds.clear();
+    }
+
+    /** One-time migration from the old device-protected SharedPreferences to Settings.Secure. */
+    private void migrateLegacyLevels() {
+        final Map<String, ?> all = mLegacyPrefs.getAll();
+        if (all.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, ?> entry : all.entrySet()) {
+            if (!entry.getKey().startsWith(PREF_PREFIX) || !(entry.getValue() instanceof Integer)) {
+                continue;
+            }
+            // Old key format: "volume:<userId>:<packageName>".
+            final String rest = entry.getKey().substring(PREF_PREFIX.length());
+            final int sep = rest.indexOf(':');
+            if (sep <= 0) {
+                continue;
+            }
+            final String packageName = rest.substring(sep + 1);
+            try {
+                final android.content.pm.ApplicationInfo info =
+                        mPackageManager.getApplicationInfoAsUser(
+                                packageName, 0, UserHandle.USER_CURRENT);
+                Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                        SETTING_PREFIX + info.uid, (Integer) entry.getValue(),
+                        UserHandle.USER_CURRENT);
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // App no longer installed; nothing to migrate.
+            }
+        }
+        mLegacyPrefs.edit().clear().apply();
     }
 
     public void setAppVolume(@NonNull String key, int volume) {
         final int clampedVolume = Math.max(0, Math.min(DEFAULT_VOLUME, volume));
-        if (clampedVolume == DEFAULT_VOLUME) {
-            mPreferences.edit().remove(PREF_PREFIX + key).apply();
-        } else {
-            mPreferences.edit().putInt(PREF_PREFIX + key, clampedVolume).apply();
-        }
-
         final AppState oldState = mActiveStates.get(key);
         if (oldState == null) {
             return;
         }
+        Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                SETTING_PREFIX + oldState.uid, clampedVolume, UserHandle.USER_CURRENT);
 
         final AppState newState = oldState.withVolume(clampedVolume);
         mActiveStates.put(key, newState);
         mKeyByUid.put(newState.uid, key);
 
-        // Re-apply to every tracked player, including ones that are not in
-        // STARTED state right now (e.g. between tracks). A new player created
-        // for the next track needs the saved multiplier before it starts.
+        // Players that are already active need the new value now. Future players
+        // get it from AudioService at registration time, without any race.
         final List<AudioPlaybackConfiguration> players = mActivePlayers.get(key);
         if (players != null) {
             for (AudioPlaybackConfiguration config : players) {
                 applyVolume(config, clampedVolume);
-            }
-        }
-        // The tracked list can be one callback behind the real state. Query fresh
-        // configurations so the new value is applied to players of this app that
-        // were created after the last callback (the exact track-switch case).
-        if (mAudioManager != null) {
-            final List<AudioPlaybackConfiguration> fresh =
-                    mAudioManager.getActivePlaybackConfigurations();
-            if (fresh != null) {
-                for (AudioPlaybackConfiguration config : fresh) {
-                    if (config == null) {
-                        continue;
-                    }
-                    final String configKey = keyForConfig(config.getClientUid(), config);
-                    if (key.equals(configKey)) {
-                        applyVolume(config, clampedVolume);
-                    }
-                }
             }
         }
         dispatchSnapshot();
@@ -241,17 +210,10 @@ public final class AppVolumeController {
         final LinkedHashMap<String, List<AudioPlaybackConfiguration>> activePlayers =
                 new LinkedHashMap<>();
         final LinkedHashMap<String, AppState> activeStates = new LinkedHashMap<>();
-        final Set<Integer> activePlayerIds = new HashSet<>();
         final Set<Integer> activePids = new HashSet<>();
 
         if (configs != null) {
             for (AudioPlaybackConfiguration config : configs) {
-                // Track *all* app players, not only ones currently in
-                // PLAYER_STATE_STARTED with a media usage. When a music app
-                // switches tracks, the replacement player first shows up as
-                // IDLE with USAGE_UNKNOWN; skipping it here meant the saved
-                // per-app multiplier was never applied and the next track
-                // played at full volume.
                 final int uid = config.getClientUid();
                 if (UserHandle.getAppId(uid) < Process.FIRST_APPLICATION_UID) {
                     continue;
@@ -263,36 +225,20 @@ public final class AppVolumeController {
                     continue;
                 }
 
-                final int userId = UserHandle.getUserId(uid);
-                final int volume = getSavedVolume(key);
-
+                final int volume = getSavedVolume(uid);
                 activePids.add(config.getClientPid());
                 activePlayers.computeIfAbsent(key, unused -> new ArrayList<>()).add(config);
-                activePlayerIds.add(config.getPlayerInterfaceId());
                 mKeyByUid.put(uid, key);
 
-                // Apply to every player, including IDLE/USAGE_UNKNOWN ones.
-                applyVolume(config, volume);
-                // A newly created player may not have its IPlayerShell ready yet, so the
-                // setVolume() above is dropped. Retry once from a fresh query shortly after.
-                if (config.getPlayerProxy() == null) {
-                    mPendingReapplyPlayerIds.add(config.getPlayerInterfaceId());
-                    mHandler.removeCallbacks(mReapplyPendingRunnable);
-                    mHandler.postDelayed(mReapplyPendingRunnable, 300);
-                }
-
-                // UI visibility stays restricted to genuinely playing media
-                // apps; isEligible() is only used for the slider list.
                 if (isEligible(config)) {
                     final String packageName = resolvePackageName(config);
                     activeStates.putIfAbsent(
-                            key, new AppState(key, packageName, uid, userId, volume));
+                            key, new AppState(key, packageName, uid,
+                                    UserHandle.getUserId(uid), volume));
                 }
             }
         }
 
-        mAppliedVolumeByPlayerId.keySet().retainAll(activePlayerIds);
-        mPendingReapplyPlayerIds.retainAll(activePlayerIds);
         mPackageByPid.keySet().retainAll(activePids);
         mActivePlayers.clear();
         mActivePlayers.putAll(activePlayers);
@@ -301,10 +247,6 @@ public final class AppVolumeController {
         dispatchSnapshot();
     }
 
-    /**
-     * Returns the preference key for a player. Prefers the key learned earlier for this uid so a
-     * package/process change between tracks keeps using the saved level.
-     */
     private String keyForConfig(int uid, AudioPlaybackConfiguration config) {
         final String known = mKeyByUid.get(uid);
         if (known != null) {
@@ -322,12 +264,10 @@ public final class AppVolumeController {
                 || config.getPlayerState() != AudioPlaybackConfiguration.PLAYER_STATE_STARTED) {
             return false;
         }
-
         final int uid = config.getClientUid();
         if (UserHandle.getAppId(uid) < Process.FIRST_APPLICATION_UID) {
             return false;
         }
-
         final int usage = config.getAudioAttributes().getUsage();
         return usage == AudioAttributes.USAGE_UNKNOWN
                 || usage == AudioAttributes.USAGE_MEDIA
@@ -336,31 +276,22 @@ public final class AppVolumeController {
                 || usage == AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE;
     }
 
-    private int getSavedVolume(String key) {
-        return Math.max(
-                0,
-                Math.min(
-                        DEFAULT_VOLUME,
-                        mPreferences.getInt(PREF_PREFIX + key, DEFAULT_VOLUME)));
+    private int getSavedVolume(int uid) {
+        return Math.max(0, Math.min(DEFAULT_VOLUME,
+                Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                        SETTING_PREFIX + uid, DEFAULT_VOLUME, UserHandle.USER_CURRENT)));
     }
 
     private void applyVolume(AudioPlaybackConfiguration config, int volume) {
-        final int playerId = config.getPlayerInterfaceId();
         final PlayerProxy proxy = config.getPlayerProxy();
         if (proxy == null) {
             return;
         }
-
-        // Always (re-)apply the saved multiplier. The old "skip if already
-        // applied to this player id" check broke track switches: a reused
-        // player id kept its stale cached value and a replacement player was
-        // left at full volume. setVolume() is cheap and idempotent.
         try {
             proxy.setVolume(volumeToGain(volume));
-            mAppliedVolumeByPlayerId.put(playerId, volume);
         } catch (RuntimeException e) {
-            // The player may be released between the playback callback and this operation.
-            Log.d(TAG, "Unable to apply app volume to player: " + playerId, e);
+            Log.d(TAG, "Unable to apply app volume to player: "
+                    + config.getPlayerInterfaceId(), e);
         }
     }
 
@@ -371,8 +302,7 @@ public final class AppVolumeController {
         if (volume >= DEFAULT_VOLUME) {
             return 1f;
         }
-        final double normalized = volume / (double) DEFAULT_VOLUME;
-        return (float) Math.pow(normalized, GAIN_CURVE_EXPONENT);
+        return (float) Math.pow(volume / (double) DEFAULT_VOLUME, 2.2d);
     }
 
     private String resolvePackageName(AudioPlaybackConfiguration config) {
@@ -427,7 +357,6 @@ public final class AppVolumeController {
                 }
                 return null;
             }
-
             try {
                 mPackageManager.getApplicationInfo(candidate, 0);
                 return candidate;

@@ -1352,6 +1352,44 @@ index 527f8bdeda91..393a19780eae 100644
  }
 +
 +private fun Int.dpToPx(context: Context): Float = this * context.resources.displayMetrics.density
+diff --git a/services/core/java/com/android/server/audio/PlaybackActivityMonitor.java b/services/core/java/com/android/server/audio/PlaybackActivityMonitor.java
+index 64b933a89b71..e3329731df92 100644
+--- a/services/core/java/com/android/server/audio/PlaybackActivityMonitor.java
++++ b/services/core/java/com/android/server/audio/PlaybackActivityMonitor.java
+@@ -51,6 +51,7 @@ import android.os.Message;
+ import android.os.PersistableBundle;
+ import android.os.RemoteException;
+ import android.os.UserHandle;
++import android.provider.Settings;
+ import android.text.TextUtils;
+ import android.util.Log;
+ import android.util.SparseIntArray;
+@@ -255,6 +256,25 @@ public final class PlaybackActivityMonitor
+                 updateAllowedCapturePolicy(apc, mAllowedCapturePolicies.get(uid));
+             }
+         }
++        // Per-app volume: apply the saved multiplier at player registration,
++        // before the client can start playback. PlayerBase keeps this as a
++        // separate mVolMultiplier, so the app's own setVolume() cannot undo it.
++        // Doing it here (synchronously in trackPlayer) avoids the race where a
++        // newly created player starts at full volume until a later callback.
++        final int appVolume = Settings.Secure.getIntForUser(
++                mContext.getContentResolver(),
++                "app_volume_" + apc.getClientUid(),
++                100,
++                UserHandle.USER_CURRENT);
++        if (appVolume < 100 && pic.mIPlayer != null) {
++            final float gain = (float) Math.pow(appVolume / 100.0, 2.2);
++            try {
++                pic.mIPlayer.setVolume(gain);
++            } catch (RemoteException e) {
++                Log.w(TAG, "Failed to apply per-app volume to piid=" + newPiid, e);
++            }
++        }
++
+         var packages = mContext.getPackageManager().getPackagesForUid(apc.getClientUid());
+         sEventLogger.enqueue(new NewPlayerEvent(
+                     apc,
 diff --git a/services/core/java/com/android/server/display/DisplayManagerService.java b/services/core/java/com/android/server/display/DisplayManagerService.java
 index e032b4e33200..185f8ce3b199 100644
 --- a/services/core/java/com/android/server/display/DisplayManagerService.java
