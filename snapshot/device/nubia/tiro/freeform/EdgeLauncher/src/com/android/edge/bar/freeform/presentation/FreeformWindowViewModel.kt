@@ -127,6 +127,11 @@ class FreeformWindowViewModel(
 
     fun setupTextureViewTouch(view: View) {
         textureViewRef = view as? TextureView
+        // The virtual display producer asks for 120 Hz, but the TextureView that
+        // presents those buffers into the host window keeps its own requested
+        // frame rate. Without this the overlay compositor presents at ~60-80 Hz
+        // while the app renders at 120 Hz (visible judder when scrolling).
+        textureViewRef?.setRequestedFrameRate(resolveTargetRefreshRate())
         view.isClickable = true
         view.isFocusable = true
         view.isFocusableInTouchMode = true
@@ -373,6 +378,7 @@ class FreeformWindowViewModel(
                 Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
             )
             Log.i(TAG, "Requested freeform surface refresh rate: ${targetRefreshRate}Hz")
+            textureViewRef?.setRequestedFrameRate(targetRefreshRate)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to request freeform surface refresh rate", e)
         }
