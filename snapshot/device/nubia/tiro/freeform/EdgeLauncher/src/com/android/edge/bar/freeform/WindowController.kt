@@ -41,11 +41,13 @@ class WindowController(
         private const val TAG = "WindowController"
         private const val SHOW_DURATION_MS = 420L
         private const val HIDE_DURATION_MS = 300L
+        private const val FULLSCREEN_HANDOFF_DURATION_MS = 450L
         private const val WINDOW_SCALE_FROM = 0.92f
         private const val WINDOW_SCALE_TO = 0.86f
 
         private val SHOW_INTERPOLATOR = PathInterpolator(0.20f, 0.94f, 0.05f, 1f)
         private val HIDE_INTERPOLATOR = PathInterpolator(0.40f, 0f, 0f, 1f)
+        private val FULLSCREEN_HANDOFF_INTERPOLATOR = PathInterpolator(0.20f, 0.90f, 0.20f, 1f)
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -248,6 +250,60 @@ class WindowController(
                 onDestroyed()
             }
         } ?: onDestroyed()
+    }
+
+    /**
+     * Hand the visible freeform surface over to a fullscreen launch of the same app
+     * (e.g. the user tapped its icon in the normal launcher). `scaleOut` shrinks the
+     * window, which reads as the overlay being killed while the app pops in; here we
+     * grow it to the display bounds while fading out, matching the visual direction
+     * of the in-overlay "open fullscreen" action and keeping the surface alive until
+     * the transition finishes.
+     */
+    fun destroyToFullscreen(reason: String, onDestroyed: () -> Unit) = runOnMain {
+        Log.i(TAG, "destroyToFullscreen: $reason")
+        val view = composeView
+        if (view == null || !view.isAttachedToWindow) {
+            removeWindowInternal()
+            onDestroyed()
+            return@runOnMain
+        }
+
+        val displayMetrics = context.resources.displayMetrics
+        view.animate().cancel()
+        view.pivotX = view.width / 2f
+        view.pivotY = view.height / 2f
+
+        val scaleX =
+            ObjectAnimator.ofFloat(
+                view,
+                View.SCALE_X,
+                view.scaleX,
+                displayMetrics.widthPixels.toFloat() / view.width.coerceAtLeast(1),
+            )
+        val scaleY =
+            ObjectAnimator.ofFloat(
+                view,
+                View.SCALE_Y,
+                view.scaleY,
+                displayMetrics.heightPixels.toFloat() / view.height.coerceAtLeast(1),
+            )
+        val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, view.alpha, 0f)
+
+        AnimatorSet().apply {
+            playTogether(scaleX, scaleY, alpha)
+            duration = FULLSCREEN_HANDOFF_DURATION_MS
+            interpolator = FULLSCREEN_HANDOFF_INTERPOLATOR
+            addListener(
+                object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        removeWindowInternal()
+                        onDestroyed()
+                    }
+                },
+            )
+            start()
+        }
     }
 
     private fun removeWindowInternal() {

@@ -168,17 +168,33 @@ class FreeformWindowCompose(
         Log.i(TAG, "destroy called: $reason")
 
         windowController.destroy(reason) {
-            // Keep the app surface alive until the scale-out animation ends;
-            // releasing it here used to make the content vanish instantly and
-            // left only an empty frame fading out.
-            if (::textureView.isInitialized) {
-                textureView.surfaceTexture?.let { surface ->
-                    Log.i(TAG, "Releasing surface texture")
-                    surface.release()
-                }
-                textureView.surfaceTextureListener = null
-            }
-            viewModel.destroy()
+            finishDestroy()
         }
+    }
+
+    /** Smooth handoff when the app is launched from the normal launcher while its
+     * freeform window (or bubble) is still alive. Mirrors the in-overlay
+     * "open fullscreen" transition instead of closing the window abruptly. */
+    fun onLaunchedFromLauncher() {
+        if (destroyed) return
+        destroyed = true
+        Log.i(TAG, "fullscreen handoff from launcher")
+
+        windowController.destroyToFullscreen("Launched from launcher") {
+            finishDestroy()
+        }
+    }
+
+    private fun finishDestroy() {
+        // Keep the app surface alive until the handoff animation ends; releasing
+        // it earlier makes the content vanish and leaves an empty fading frame.
+        if (::textureView.isInitialized) {
+            textureView.surfaceTexture?.let { surface ->
+                Log.i(TAG, "Releasing surface texture")
+                surface.release()
+            }
+            textureView.surfaceTextureListener = null
+        }
+        viewModel.destroy()
     }
 }

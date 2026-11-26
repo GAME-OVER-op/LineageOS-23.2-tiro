@@ -99,11 +99,16 @@ class FreeformTaskStackListener(
         val freeformDisplayId = window.stateManager.state.value.displayId
 
         if (freeformDisplayId >= 0 && task.displayId != freeformDisplayId) {
+            // The app was launched from the normal launcher (or otherwise moved to
+            // the default display). Hand the overlay over with the same grow-and-fade
+            // animation used by the in-overlay "open fullscreen" action instead of
+            // killing the window while the app pops in abruptly.
             Log.i(
                 TAG,
-                "Closing stale freeform window for $packageName: task moved to display ${task.displayId}, freeform display is $freeformDisplayId"
+                "Handing freeform window to fullscreen for $packageName: task moved to display ${task.displayId}, freeform display is $freeformDisplayId"
             )
-            windowManager.closeWindow(packageName)
+            windowManager.getWindow(packageName)?.onLaunchedFromLauncher()
+                ?: windowManager.closeWindow(packageName)
             return
         }
 

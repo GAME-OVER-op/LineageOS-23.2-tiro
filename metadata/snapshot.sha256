@@ -103,8 +103,8 @@ a84f24dc91d07b7831531e4fbee726f1043ac01f784e095e2594dbf1c92d0571  snapshot/devic
 7d1caf20f745cf15316166854ebff45e24708bed4d120602d774dd7897666c34  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/domain/FreeformModels.kt
 e3626a204f9221e7f5f50b9502ad952354757de2aa3f829d9106bbf72b76604c  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/DpUtils.kt
 4416788101d8426a96b3f51ebdb0a4014c48f413219301e870281e7085f2bbd7  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformConfig.kt
-f804e610113ff2eee3f8183c77c4fd68f1ac36ea724fe3a61bcf4a29a7542826  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformTaskStackListener.kt
-ff15674fe7eef36dd5b3674e20518cb2cf0fa7ae886bfaca9a0a9db93f5fc557  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformWindowCompose.kt
+db0bd0342534020388843090f3a7e6859c83d5f81c631ed5a9cda85de88af005  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformTaskStackListener.kt
+a0e8bf44b0bb79c4f3bb823128894f34f0c01f540835d78b4abdb3f3e58bc353  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformWindowCompose.kt
 fab6e9d8edacb061486dd5d1310de349ba46ac73902db619c65db9e57e40dbb0  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/FreeformWindowManager.kt
 b83c7dded9dfe22df944450ea6643dce6d785f71d45868b7fbbefe540f068892  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/InputInjector.kt
 8c858c73bbbfc31b4c3118a126520b1fa238d2974405ba85d9638056ab975be0  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/presentation/components/BubbleView.kt
@@ -117,7 +117,7 @@ c253329e0312ed83409cc62f80bb611aefd3b8bec0e8f04a7b4b7bec6cd4c0bb  snapshot/devic
 4bb5e9b8f233a6d0830385a2101a915df6c6ef7b3425624d43467da49b88245d  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/presentation/FreeformWindowUI.kt
 004be46201f5cc112cfe17d35dc678dba69bbd975e56bdedad91899d56eeb97a  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/presentation/FreeformWindowViewModel.kt
 8d32c9e6650211527413342ba04c38841ff452b7289016a0c29fa22a8606d5d2  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/presentation/SurfaceEventsManager.kt
-9cfa7e127558d2a5ce2471d16c4e8f71057774bb8324e45fa5906dd8aca2be63  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/WindowController.kt
+b5f74b7787a26b75126da7d554ecdab57eed35e527b394227f9c6d0fbf7f566f  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/WindowController.kt
 ae3e93a39363a77af2aa00e41cac5e9b66fc38fd91b7a0b781128deb3b3d8b4b  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/freeform/WindowSnapping.kt
 a1d4bd8c8784d7a516590e4fc6b3aa4e077e0dd344c14f24a3da779b44a8a5d1  snapshot/device/nubia/tiro/freeform/EdgeLauncher/src/com/android/edge/bar/lifecycle/repeatWhenAttached.kt
 6f3a28d3e9a3bef988cc49a79a3efff59f3337eda2b2058fe162b817d662623e  snapshot/device/nubia/tiro/lineage_tiro.mk
