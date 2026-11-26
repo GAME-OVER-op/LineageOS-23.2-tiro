@@ -66,6 +66,15 @@ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
     vendor.gpp.allgame.enable=0 \
     dalvik.vm.dex2oat64.enabled=true
 
+# The vendor PAL/HAL on tiro misreports the wired headset jack whenever an app
+# uses MMAP AAudio streams (seen with games in freeform): it emits a fake
+# unplug/plug every ~5s, which flips the mixer between speaker and headset and
+# floods the log/CPU. Force legacy AAudio so streams stay on one route.
+# Verified on device: plug events 28-34/90s -> 0/75s, log 100k+ -> 15k lines.
+PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+    aaudio.mmap_policy=0 \
+    aaudio.mmap_exclusive_policy=0
+
 # This is a 64-bit-only platform (no dex2oat32 in the ART APEX). core_64_bit.mk
 # (used for the stable bp3a release) does not set the flag that core_64_bit_only.mk
 # sets. Without it artd picks dex2oat32 and aborts with "No such file or directory".
