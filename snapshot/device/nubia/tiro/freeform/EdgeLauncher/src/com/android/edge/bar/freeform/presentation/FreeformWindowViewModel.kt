@@ -450,9 +450,22 @@ class FreeformWindowViewModel(
                                         // would be skipped and the app would keep the wrong UI
                                         // scale. Force the density onto the moved task.
                                         val latest = stateManager.state.value
+                                        // resizeVirtualDisplay expects the app-surface size,
+                                        // not the outer window size: the window also contains
+                                        // the title bar and the bottom resize handle, which
+                                        // are not part of the TextureView. Passing the window
+                                        // size here makes the virtual display taller than its
+                                        // surface, so apps render vertically squeezed (circles
+                                        // look like horizontal ovals) until the next resize.
+                                        val (displayWidth, displayHeight) =
+                                            stateManager.getAppSurfaceDimensions(
+                                                windowWidth = latest.width,
+                                                windowHeight = latest.height,
+                                                mode = latest.mode,
+                                            )
                                         resizeVirtualDisplay(
-                                            latest.width,
-                                            latest.height,
+                                            displayWidth,
+                                            displayHeight,
                                             force = true,
                                         )
                                         finishAttach(displayId, onDisplayReady)
