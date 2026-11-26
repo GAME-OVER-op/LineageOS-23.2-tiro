@@ -18,6 +18,9 @@ internal object LightingRuntimeStore {
     data class State(
         val screenOn: Boolean = true,
         val notificationActive: Boolean = false,
+        // Incremented on every posted notification so a new notification from an
+        // app that already has one restarts the visual pulse as well.
+        val notificationSeq: Long = 0,
     )
 
     @Synchronized
@@ -38,6 +41,9 @@ internal object LightingRuntimeStore {
                     "screen_on" -> state.copy(screenOn = parseBool(value, state.screenOn))
                     "notification_active" -> state.copy(
                         notificationActive = parseBool(value, state.notificationActive),
+                    )
+                    "notification_seq" -> state.copy(
+                        notificationSeq = value.toLongOrNull() ?: state.notificationSeq,
                     )
                     else -> state
                 }
@@ -68,6 +74,7 @@ internal object LightingRuntimeStore {
             appendLine("version=1")
             appendLine("screen_on=${state.screenOn.asFlag()}")
             appendLine("notification_active=${state.notificationActive.asFlag()}")
+            appendLine("notification_seq=${state.notificationSeq}")
         }
 
         val temporary = File(TEMP_PATH)
@@ -97,10 +104,17 @@ internal object LightingRuntimeStore {
         state.copy(
             screenOn = screenOn,
             notificationActive = if (screenOn) false else state.notificationActive,
+            notificationSeq = if (screenOn) 0L else state.notificationSeq,
         )
     }
 
-    fun setNotificationActive(active: Boolean) = update { it.copy(notificationActive = active) }
+    fun setNotificationActive(active: Boolean) = update { state ->
+        if (active) {
+            state.copy(notificationActive = true, notificationSeq = state.notificationSeq + 1)
+        } else {
+            state.copy(notificationActive = false, notificationSeq = 0)
+        }
+    }
 
     private fun parseBool(value: String, fallback: Boolean): Boolean = when {
         value == "1" || value.equals("true", true) || value.equals("on", true) -> true

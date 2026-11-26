@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -50,15 +51,18 @@ struct LightingConfig {
 struct RuntimeState {
     bool screenOn = true;
     bool notificationActive = false;
+    long long notificationSeq = 0;
     bool fanActive = false;
 };
 
 struct DesiredState {
     std::optional<std::string> fan;
     std::optional<std::string> external;
+    long long notificationSeq = 0;
 
     bool operator==(const DesiredState& other) const {
-        return fan == other.fan && external == other.external;
+        return fan == other.fan && external == other.external &&
+                notificationSeq == other.notificationSeq;
     }
     bool operator!=(const DesiredState& other) const { return !(*this == other); }
 };
@@ -153,6 +157,8 @@ RuntimeState readRuntime() {
                 state.screenOn = parseBool(value, state.screenOn);
             } else if (key == "notification_active") {
                 state.notificationActive = parseBool(value, state.notificationActive);
+            } else if (key == "notification_seq") {
+                state.notificationSeq = strtoll(value.c_str(), nullptr, 10);
             }
         }
     }
@@ -251,6 +257,10 @@ DesiredState desiredState(const LightingConfig& config, const RuntimeState& runt
     // night when no notification is present.
     if (config.notificationEnabled && runtime.notificationActive) {
         desired.external = config.notificationCode;
+        // A counter, not just a boolean: a new notification from an app that
+        // already has one must restart the effect, otherwise the LED keeps
+        // breathing from the previous notification and looks unchanged.
+        desired.notificationSeq = runtime.notificationSeq;
     } else if (runtime.screenOn && config.triggerEnabled) {
         // Physical trigger/external lighting is intentionally independent of
         // shoulder-trigger touch mapping, matching the corrected Axion logic.
