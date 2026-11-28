@@ -8,12 +8,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
-import android.view.WindowManager
+import android.view.Display
 import org.lineageos.settings.utils.getInt
 import java.io.File
 
@@ -25,6 +25,7 @@ object TriggerRuntimeController {
     private var initialized = false
     private var editor = false
     private var lastWritten: String? = null
+    private var lastRotation = -1
     private val runtime = File("/data/system/nubia_triggers/runtime.conf")
 
     private val listener = object : TaskStackListener() {
@@ -45,6 +46,21 @@ object TriggerRuntimeController {
                 i.action == Intent.ACTION_USER_PRESENT) publish()
         }
     }
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = onDisplayChanged(displayId)
+        override fun onDisplayRemoved(displayId: Int) = onDisplayChanged(displayId)
+        override fun onDisplayChanged(displayId: Int) {
+            // Ignore virtual displays and changes that are only to the refresh rate.
+            if (displayId == Display.DEFAULT_DISPLAY && rotationOf(primaryDisplay()) != lastRotation) {
+                publish()
+            }
+        }
+    }
+
+    private fun primaryDisplay(): Display? =
+        context.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+
+    private fun rotationOf(display: Display?): Int = display?.rotation ?: -1
 
     @Synchronized fun initialize(c: Context) {
         if (initialized) { publish(); return }
@@ -56,6 +72,7 @@ object TriggerRuntimeController {
             addAction(Intent.ACTION_CONFIGURATION_CHANGED)
         }
         context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        context.getSystemService(DisplayManager::class.java)?.registerDisplayListener(displayListener, main)
         try {
             ActivityTaskManager.getService().registerTaskStackListener(listener)
         } catch (e: Exception) {
@@ -70,10 +87,14 @@ object TriggerRuntimeController {
     fun publish() {
         if (!initialized) return
         val pm = context.getSystemService(PowerManager::class.java)
-        val wm = context.getSystemService(WindowManager::class.java)
+        val display = primaryDisplay()
+        lastRotation = rotationOf(display)
         val foreground = try {
             val root = ActivityTaskManager.getService().focusedRootTaskInfo
-            root?.topActivity?.packageName.orEmpty()
+            // A freeform app on a virtual display can have global task focus, but
+            // our synthetic contacts still go to the physical touchscreen.
+            root?.takeIf { it.displayId == Display.DEFAULT_DISPLAY && it.isVisible }
+                ?.topActivity?.packageName.orEmpty()
         } catch (e: Exception) {
             Log.w(TAG, "Cannot read focused task; triggers will remain inactive", e)
             ""
@@ -81,9 +102,9 @@ object TriggerRuntimeController {
         val content = buildString {
             appendLine("version=1")
             appendLine("enabled=${if (getInt(context, TriggerController.KEY_TRIGGER_ENABLE, 0) == 1) 1 else 0}")
-            appendLine("screen=${if (pm.isInteractive) 1 else 0}")
+            appendLine("screen=${if (display != null && pm.isInteractive) 1 else 0}")
             appendLine("editing=${if (editor) 1 else 0}")
-            appendLine("rotation=${wm.defaultDisplay.rotation}")
+            appendLine("rotation=$lastRotation")
             appendLine("foreground=$foreground")
             TriggerProfileStore.load().forEach { p ->
                 fun b(v: TriggerProfileStore.Binding): String =

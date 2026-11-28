@@ -46,10 +46,11 @@ struct controller {
     int virt_slots[2];
     int tid[MAX_SLOTS], current_slot, frame_open_slot;
     int finger_count;
-    bool virt_down[2], sar_state[2], sar_key[2], active, pending, pending_stop;
+    bool virt_down[2], sar_state[2], sar_key[2], sar_rearm[2], active, pending, pending_stop;
     struct input_event frame[MAX_EVENTS];
     size_t frame_n;
     struct binding selected[2];
+    char foreground[256];
     int rotation;
 };
 static struct controller g = {
@@ -148,7 +149,9 @@ static int physical_fingers(void) {
     return n;
 }
 static int count_active(void) {
-    return physical_fingers()+(int)g.virt_down[0]+(int)g.virt_down[1];
+    /* The next physical report may be only half read. Synthetic reports must
+       use the finger count from the last report actually sent to Android. */
+    return g.finger_count+(int)g.virt_down[0]+(int)g.virt_down[1];
 }
 static void tool_buttons(void) {
     int n=count_active();
@@ -201,6 +204,7 @@ static void reset_all_contacts(void) {
         emit(EV_ABS,ABS_MT_TRACKING_ID,-1);g.virt_down[i]=false;
     }
     for(int i=0;i<MAX_SLOTS;i++)g.tid[i]=-1;
+    g.finger_count=0;
     tool_buttons();sync_frame();
 }
 static void stop_merge(void) {
@@ -208,6 +212,9 @@ static void stop_merge(void) {
     if(g.touch.fd>=0) ioctl(g.touch.fd,EVIOCGRAB,0);
     close_device(&g.touch);close_device(&g.left);close_device(&g.right);
     if(g.ufd>=0) {ioctl(g.ufd,UI_DEV_DESTROY);close(g.ufd);g.ufd=-1;}
+    memset(g.sar_key,0,sizeof(g.sar_key));
+    memset(g.sar_state,0,sizeof(g.sar_state));
+    memset(g.sar_rearm,0,sizeof(g.sar_rearm));
     g.active=false;g.pending=false;g.pending_stop=false;g.frame_n=0;mode_off();
 }
 static bool create_uinput(void) {
@@ -246,6 +253,7 @@ static bool create_uinput(void) {
     return true;
 }
 static bool touch_is_down(void) {
+    if(g.touch.fd<0)return false;
     unsigned long bits[BITS(KEY_MAX+1)]={0};
     return ioctl(g.touch.fd,EVIOCGKEY(sizeof(bits)),bits)<0 ||
            bit(bits,BITS(KEY_MAX+1),BTN_TOUCH);
@@ -264,7 +272,12 @@ static bool start_merge(void) {
     /* NEVER grab physical touch until virtual device is completely ready. */
     if(ioctl(g.touch.fd,EVIOCGRAB,1)<0){LOGE("grab: %s",strerror(errno));stop_merge();return false;}
     for(int i=0;i<MAX_SLOTS;i++)g.tid[i]=-1;
-    g.current_slot=0;g.frame_open_slot=0;g.frame_n=0;
+    /* Type-B slots are sticky, even when no finger is down at handoff. */
+    struct input_absinfo slot={0};
+    if(ioctl(g.touch.fd,EVIOCGABS(ABS_MT_SLOT),&slot)<0 ||
+       slot.value<0 || slot.value>g.slot_max)slot.value=0;
+    g.current_slot=g.frame_open_slot=slot.value;
+    g.finger_count=0;g.frame_n=0;
     if(watch_add(g.touch.fd)<0 || watch_add(g.left.fd)<0 || watch_add(g.right.fd)<0) {
         LOGE("epoll inputs failed");stop_merge();return false;
     }
@@ -274,6 +287,25 @@ static bool start_merge(void) {
 }
 static bool same_binding(struct binding a,struct binding b) {
     return a.enabled==b.enabled&&a.valid==b.valid&&a.x==b.x&&a.y==b.y;
+}
+static bool binding_active(struct binding binding) {
+    return binding.enabled&&binding.valid;
+}
+static void update_bindings(const struct binding selected[2],int rotation,const char *foreground) {
+    bool target_changed=strcmp(g.foreground,foreground)!=0 || g.rotation!=rotation;
+    for(int i=0;i<2;i++) {
+        bool was_active=binding_active(g.selected[i]);
+        bool now_active=binding_active(selected[i]);
+        if(!same_binding(g.selected[i],selected[i]) || (was_active&&target_changed)) {
+            // Don't turn a press held across a task/rotation switch into a new tap.
+            if(g.sar_key[i]||g.sar_state[i])g.sar_rearm[i]=true;
+            release_virtual(i);
+        }
+        g.selected[i]=selected[i];
+        if(g.active && was_active!=now_active)set_mode(i==0?PROC_L:PROC_R,now_active);
+    }
+    g.rotation=rotation;
+    snprintf(g.foreground,sizeof(g.foreground),"%s",foreground);
 }
 static bool good_package(const char *p) {
     if(!*p||strlen(p)>220)return false;
@@ -307,43 +339,49 @@ static bool read_config(struct config *cfg) {
     }
     fclose(f);return version;
 }
-static void refresh(void) {
-    struct config c;
-    if(!read_config(&c)){
-        LOGE("invalid/unreadable config; disable merge");
-        if(physical_fingers()>0 || touch_is_down()){g.pending_stop=true;return;}
-        stop_merge();return;
-    }
+static void apply_config(const struct config *c,bool valid) {
+    bool keep_merge=valid&&c->enabled&&c->screen;
     struct binding selected[2]={{0},{0}};
-    int rot=c.rotation;
-    if(c.enabled&&c.screen&&!c.editing&&good_package(c.foreground)) {
-        for(int i=0;i<c.profiles_n;i++){
-            struct profile *p=&c.profiles[i];
-            if(!strcmp(p->pkg,c.foreground)&&p->rotation==rot){selected[0]=p->l;selected[1]=p->r;break;}
+    int rot=c->rotation;
+    if(keep_merge&&!c->editing&&good_package(c->foreground)) {
+        for(int i=0;i<c->profiles_n;i++){
+            const struct profile *p=&c->profiles[i];
+            if(!strcmp(p->pkg,c->foreground)&&p->rotation==rot){selected[0]=p->l;selected[1]=p->r;break;}
         }
     }
-    bool required=(selected[0].enabled&&selected[0].valid)||(selected[1].enabled&&selected[1].valid);
-    bool changed=!same_binding(g.selected[0],selected[0])||
-        !same_binding(g.selected[1],selected[1])||g.rotation!=rot;
+    bool required=binding_active(selected[0])||binding_active(selected[1]);
+    update_bindings(selected,rot,required?c->foreground:"");
 
-    if(g.pending_stop) return;
-
-    if((g.active||g.pending) && (!required||changed)) {
-        /* A navigation swipe changes foreground/rotation mid-gesture. Tearing
-           down the input device here cancels the gesture, rotates the UI and
-           can relaunch the app. Wait until every physical finger is lifted. */
-        if(physical_fingers()>0 || touch_is_down()) {
+    /* Once acquired for a game, keep the same Android input device for this
+       screen-on session. Home, Recents, configuration changes and opening the
+       editor only change trigger slots, never the physical finger stream. */
+    if(!keep_merge) {
+        if(g.active && (g.frame_n>0 || physical_fingers()>0 || touch_is_down())) {
+            if(!g.pending_stop)LOGI("deferring touch merge stop until fingers lift");
             g.pending_stop=true;
-            LOGI("deferring trigger teardown until fingers lift");
             return;
         }
-        stop_merge();
+        if(g.active||g.pending)stop_merge();
+        return;
     }
-    g.selected[0]=selected[0];g.selected[1]=selected[1];g.rotation=rot;
-    if(required&&!g.active&&!g.pending)start_merge();
+    g.pending_stop=false;
+    // A pending start only listens to physical events, it has not grabbed touch.
+    if(g.pending&&!required)stop_merge();
+    else if(required&&!g.active&&!g.pending)start_merge();
+}
+static void refresh(void) {
+    struct config c;
+    bool valid=read_config(&c);
+    if(!valid && (g.active||g.pending))LOGE("invalid/unreadable config; disable merge");
+    apply_config(&c,valid);
+}
+static bool generated_touch_button(unsigned int code) {
+    return code==BTN_TOUCH||code==BTN_TOOL_FINGER||code==BTN_TOOL_DOUBLETAP||
+        code==BTN_TOOL_TRIPLETAP||code==BTN_TOOL_QUADTAP||code==BTN_TOOL_QUINTTAP;
 }
 static void handle_touch(void) {
     struct input_event ev[64];ssize_t n=read(g.touch.fd,ev,sizeof(ev));
+    if(n<0&&(errno==EAGAIN||errno==EINTR))return;
     if(n<=0||n%(ssize_t)sizeof(struct input_event)) {LOGE("touch read failed");stop_merge();return;}
     size_t events=(size_t)n/sizeof(ev[0]);
     for(size_t i=0;i<events;i++) {
@@ -361,16 +399,14 @@ static void handle_touch(void) {
                 struct input_event *p=&g.frame[j];
                 if(!emit(p->type,p->code,p->value)){stop_merge();return;}
             }
+            g.finger_count=physical_fingers();
             tool_buttons();sync_frame();g.frame_n=0;g.frame_open_slot=g.current_slot;
             if(g.pending_stop && physical_fingers()==0 && !touch_is_down()) {
-                /* Finger lifted: now it is safe to release the grab and
-                   destroy the virtual device. */
-                stop_merge();
+                // Re-read the latest request: it may have been turned back on.
                 refresh();
                 return;
             }
-        } else if(!(e.type==EV_KEY && (e.code==BTN_TOUCH||
-            (e.code>=BTN_TOOL_FINGER&&e.code<=BTN_TOOL_QUINTTAP)))) {
+        } else if(!(e.type==EV_KEY && generated_touch_button(e.code))) {
             if(g.frame_n==MAX_EVENTS){LOGE("touch frame overflow: fail-open");stop_merge();return;}
             g.frame[g.frame_n++]=e;
         }
@@ -378,6 +414,7 @@ static void handle_touch(void) {
 }
 static void handle_sar(int fd) {
     struct input_event events[32];ssize_t n=read(fd,events,sizeof(events));
+    if(n<0&&(errno==EAGAIN||errno==EINTR))return;
     if(n<=0||n%(ssize_t)sizeof(struct input_event)){stop_merge();return;}
     for(size_t k=0;k<(size_t)n/sizeof(events[0]);k++){
         struct input_event e=events[k];
@@ -389,19 +426,21 @@ static void handle_sar(int fd) {
             g.sar_state[which]=e.value!=0;
         else continue;
         bool pressed=g.sar_key[which]||g.sar_state[which];
-        if(pressed&&!g.virt_down[which])down_virtual(which);
-        else if(!pressed&&g.virt_down[which])release_virtual(which);
+        if(!pressed) {
+            g.sar_rearm[which]=false;
+            release_virtual(which);
+        } else if(!g.sar_rearm[which]&&!g.virt_down[which])down_virtual(which);
     }
 }
 static void handle_pending(void) {
     struct input_event events[64];
     ssize_t n=read(g.touch.fd,events,sizeof(events));
+    if(n<0&&(errno==EAGAIN||errno==EINTR))return;
     if(n<=0){stop_merge();return;}
     if(!touch_is_down()) {
         /* Close passive monitor and rediscover the input stream before GRAB. */
         close_device(&g.touch);close_device(&g.left);close_device(&g.right);
         g.pending=false;
-        if(g.pending_stop){g.pending_stop=false;refresh();return;}
         start_merge();
     }
 }
