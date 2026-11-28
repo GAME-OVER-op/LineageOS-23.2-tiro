@@ -33,7 +33,7 @@ cd /path/to/android-source && ./build.sh
 - **Freeform / EdgeLauncher** integration (virtual-display based floating windows,
   smooth scale-up fullscreen expansion and DPI restoration) under
   `snapshot/device/nubia/tiro/freeform/`. Minimize-to-bubble keeps the window's
-  `TextureView`/virtual display mounted and never powers the display off, so
+  `SurfaceView`/virtual display mounted and never powers the display off, so
   reopening does not recreate the app Activity or lose playback/task state;
 - custom SystemUI per-app volume implementation (AppVolumeController + dialog sliders/binder);
 - Launcher3 overview freeform action;
@@ -46,9 +46,17 @@ cd /path/to/android-source && ./build.sh
   - stock NX809J GPP libraries for reference under `snapshot/prebuilts/nubia-stock/lib64/`;
   - DTS:X Ultra prebuilt APK/JAR/databases under `snapshot/vendor/nubia/tiro/dtsx/`.
 
+## System frame generation
+
+**Settings → Display → Frame generation** exposes the opt-in, per-application
+SurfaceFlinger implementation for SDR video and eligible app layers. It is independent
+of GPP and uses the display's active refresh cadence. See
+[`frame-generation.md`](snapshot/device/nubia/tiro/docs/frame-generation.md) for
+eligibility, diagnostics and device acceptance checks.
+
 ## Note on GPP / FRC++ frame generation
 
-The ROM-side GPP extension sources are present, but frame generation is **disabled by default**
+The ROM-side GPP extension sources are present, but the GPP path is **disabled by default**
 (`vendor.gpp.create_frc_extension=0` in `snapshot/device/nubia/tiro/device.mk`) because the Qualcomm
 VPP usecase on tiro cannot actually start interpolation (`ConfigureDynamic() ... ret=7`,
 `fastrpc_get_info_from_dsp ... -111`). Full investigation, reproduction steps and rationale are in

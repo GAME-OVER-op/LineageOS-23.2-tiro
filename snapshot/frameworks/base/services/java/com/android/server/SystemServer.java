@@ -174,6 +174,7 @@ import com.android.server.criticalevents.CriticalEventLog;
 import com.android.server.devicepolicy.DevicePolicyManagerService;
 import com.android.server.devicestate.DeviceStateManagerService;
 import com.android.server.display.DisplayManagerService;
+import com.android.server.display.FrameGenerationService;
 import com.android.server.display.color.ColorDisplayService;
 import com.android.server.dreams.DreamManagerService;
 import com.android.server.emergency.EmergencyAffordanceService;
@@ -2873,6 +2874,12 @@ public final class SystemServer implements Dumpable {
         t.traceBegin("StartMediaProjectionManager");
         mSystemServiceManager.startService(MediaProjectionManagerService.class);
         t.traceEnd();
+
+        if (context.getResources().getBoolean(R.bool.config_frameGenerationAvailable)) {
+            t.traceBegin("StartFrameGenerationService");
+            mSystemServiceManager.startService(FrameGenerationService.class);
+            t.traceEnd();
+        }
 
         if (isWatch) {
             // Must be started before services that depend it, e.g. WearConnectivityService

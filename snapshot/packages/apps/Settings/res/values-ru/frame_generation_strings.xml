@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 The LineageOS Project
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+-->
+<resources>
+    <string name="frame_generation_title">Генерация кадров</string>
+    <string name="frame_generation_use">Включить генерацию кадров</string>
+    <string name="frame_generation_default_mode">Режим по умолчанию</string>
+    <string name="frame_generation_selected_apps">Только выбранные приложения</string>
+    <string name="frame_generation_auto_all">Авто для всех приложений</string>
+    <string name="frame_generation_max_fps">Ограничение частоты кадров</string>
+    <string name="frame_generation_auto">Авто</string>
+    <string name="frame_generation_60_fps">60 кадр/с</string>
+    <string name="frame_generation_120_fps">120 кадр/с</string>
+    <string name="frame_generation_pause_in_battery_saver">Приостанавливать в режиме энергосбережения</string>
+    <string name="frame_generation_apps_title">Настройки приложений</string>
+    <string name="frame_generation_apps_summary">Выберите, в каких приложениях использовать генерацию кадров</string>
+    <string name="frame_generation_search_apps">Поиск приложений</string>
+    <string name="frame_generation_loading_apps">Загрузка приложений…</string>
+    <string name="frame_generation_no_apps">Нет приложений, которые можно запустить</string>
+    <string name="frame_generation_no_matching_apps">Приложения не найдены</string>
+    <string name="frame_generation_load_failed">Не удалось загрузить приложения</string>
+    <string name="frame_generation_update_failed">Не удалось сохранить настройку генерации кадров</string>
+    <string name="frame_generation_app_default">По умолчанию</string>
+    <string name="frame_generation_app_off">Выкл.</string>
+    <string name="frame_generation_app_video_only">Только видео</string>
+    <string name="frame_generation_app_summary">%1$s · %2$s</string>
+    <string name="frame_generation_explanation">Промежуточные кадры добавляются, когда экран успевает их показать. Лимит кадров не меняет частоту обновления экрана. HDR и защищённое видео воспроизводятся без интерполяции.</string>
+</resources>

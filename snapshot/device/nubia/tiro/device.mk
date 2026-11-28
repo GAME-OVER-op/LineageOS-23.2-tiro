@@ -37,6 +37,10 @@ $(call inherit-product, vendor/nubia/tiro/dtsx/dtsx.mk)
 PRODUCT_PACKAGES += \
     SettingsProviderResTiro
 
+# Frame generation is opt-in and is exposed only for this product.
+PRODUCT_PACKAGE_OVERLAYS += $(DEVICE_PATH)/overlay-frame-generation
+PRODUCT_ENFORCE_RRO_EXCLUDED_OVERLAYS += $(DEVICE_PATH)/overlay-frame-generation
+
 # GPP frame generation (Qualcomm FRC++ via vendor.gppservice) -- DISABLED
 #
 # NOTE (2026-11-20): The ROM-side GPP/FRC++ integration is present in the tree
