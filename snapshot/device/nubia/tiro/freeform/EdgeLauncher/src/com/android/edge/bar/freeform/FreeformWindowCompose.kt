@@ -17,9 +17,8 @@ package com.android.edge.bar.freeform
 
 import android.content.Context
 import android.view.Display
-import android.graphics.SurfaceTexture
 import android.util.Log
-import android.view.TextureView
+import android.view.SurfaceHolder
 import com.android.edge.bar.freeform.presentation.FreeformStateManager
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +30,7 @@ import kotlin.math.roundToInt
 import androidx.lifecycle.*
 import com.android.edge.bar.freeform.presentation.FreeformWindowContent
 import com.android.edge.bar.freeform.presentation.FreeformWindowViewModel
+import com.android.edge.bar.freeform.presentation.WindowMode
 import com.android.edge.bar.lifecycle.repeatWhenAttached
 
 class FreeformWindowCompose(
@@ -41,13 +41,11 @@ class FreeformWindowCompose(
     private val taskId: Int = -1,
     val desktopMode: Boolean = false,
     private val targetDisplayId: Int = Display.DEFAULT_DISPLAY,
-) : TextureView.SurfaceTextureListener {
+) : SurfaceHolder.Callback {
 
     companion object {
         private const val TAG = "FreeformWindowCompose"
     }
-
-    private lateinit var textureView: TextureView
 
     private var destroyed = false
 
@@ -60,7 +58,7 @@ class FreeformWindowCompose(
         userId = userId,
         taskId = taskId,
         desktopMode = desktopMode,
-        onWindowDead = { destroy("App killed externally") }
+        onWindowDead = { destroy("App killed externally") },
     )
 
     val stateManager: FreeformStateManager get() = viewModel.stateManager
@@ -71,12 +69,8 @@ class FreeformWindowCompose(
     }
 
     private fun createFreeformView() {
-        windowController.initWindowParams(
-            width = viewModel.config.width,
-            height = viewModel.config.height,
-            x = viewModel.initialX.roundToInt(),
-            y = viewModel.initialY.roundToInt()
-        )
+        val state = viewModel.windowState.value
+        windowController.initWindowParams(state.width, state.height, state.x.roundToInt(), state.y.roundToInt())
 
         val composeView = ComposeView(context).apply {
             repeatWhenAttached {
@@ -93,6 +87,7 @@ class FreeformWindowCompose(
         windowController.createWindow(composeView) { success ->
             if (!success) {
                 Log.e(TAG, "Failed to create freeform window")
+                destroy("Failed to attach overlay")
             }
         }
     }
@@ -118,15 +113,12 @@ class FreeformWindowCompose(
                 onBringToFront = { bringToFront() },
                 onMaximizeFullscreen = { 
                     viewModel.launchFullscreen { 
-                        closeWindow() 
+                        destroy("Fullscreen launch finished")
                     } 
                 },
                 onUpdateWindowLayout = { x, y, w, h -> windowController.updateLayout(x.roundToInt(), y.roundToInt(), w, h) },
-                onSetupTextureView = { view ->
-                    textureView = view
-                    viewModel.setupTextureViewTouch(view)
-                },
-                textureViewListener = this@FreeformWindowCompose,
+                onSetupSurfaceView = viewModel::setupSurfaceView,
+                surfaceCallback = this@FreeformWindowCompose,
                 inputInjector = viewModel.inputInjector
             )
         }
@@ -148,15 +140,18 @@ class FreeformWindowCompose(
         destroy("User closed freeform window")
     }
 
-    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-        viewModel.onSurfaceTextureAvailable(surface, width, height) { displayId ->
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        if (destroyed) return
+        viewModel.onSurfaceAvailable(holder.surface) { displayId ->
             Log.i(TAG, "Display ready: $displayId")
         }
     }
 
-    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
-    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
-    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        if (!destroyed) destroy("App surface detached")
+    }
 
     fun requestFocus() {
         windowController.requestFocus()
@@ -177,6 +172,10 @@ class FreeformWindowCompose(
      * "open fullscreen" transition instead of closing the window abruptly. */
     fun onLaunchedFromLauncher() {
         if (destroyed) return
+        if (stateManager.state.value.mode == WindowMode.BUBBLE) {
+            destroy("Launched from launcher while minimized")
+            return
+        }
         destroyed = true
         Log.i(TAG, "fullscreen handoff from launcher")
 
@@ -186,15 +185,7 @@ class FreeformWindowCompose(
     }
 
     private fun finishDestroy() {
-        // Keep the app surface alive until the handoff animation ends; releasing
-        // it earlier makes the content vanish and leaves an empty fading frame.
-        if (::textureView.isInitialized) {
-            textureView.surfaceTexture?.let { surface ->
-                Log.i(TAG, "Releasing surface texture")
-                surface.release()
-            }
-            textureView.surfaceTextureListener = null
-        }
         viewModel.destroy()
+        viewModel.freeformWindowManager.unregisterWindow(packageName, this)
     }
 }

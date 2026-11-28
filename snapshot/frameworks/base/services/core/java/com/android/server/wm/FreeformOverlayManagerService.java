@@ -183,11 +183,16 @@ public class FreeformOverlayManagerService extends SystemService {
                 Slog.i(TAG, "releaseFreeform: token=" + appToken);
                 DisplayManagerInternal dmi = LocalServices.getService(DisplayManagerInternal.class);
                 if (dmi != null) {
-                    int displayId = dmi.getDisplayIdForFreeformToken(appToken);
-                    if (displayId > 0) {
-                        minimizeTaskOnDisplay(displayId);
+                    try {
+                        int displayId = dmi.getDisplayIdForFreeformToken(appToken);
+                        if (displayId > 0) {
+                            minimizeTaskOnDisplay(displayId);
+                        }
+                    } finally {
+                        // The task can disappear while the window is closing. This
+                        // must not prevent the virtual display from being released.
+                        dmi.releaseFreeform(appToken);
                     }
-                    dmi.releaseFreeform(appToken);
                 }
             } finally {
                 Binder.restoreCallingIdentity(token);

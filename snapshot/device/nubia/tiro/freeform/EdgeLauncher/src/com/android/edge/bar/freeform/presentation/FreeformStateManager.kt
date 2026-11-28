@@ -140,6 +140,7 @@ class FreeformStateManager(
     private val eventFlow = MutableSharedFlow<WindowEvent>(extraBufferCapacity = 64)
     private var acceptsDisplayPauseCallback = false
     private var bubblePositionAnimationJob: Job? = null
+    private var bubbleNeedsResize = false
 
     private val _state = MutableStateFlow(WindowState(
         x = initialX,
@@ -163,25 +164,16 @@ class FreeformStateManager(
                 FreeformConstants.RESIZE_HANDLE_BOTTOM_HEIGHT_DP
         )
 
-    fun getAppSurfaceDimensions(
-        windowWidth: Int = currentState.width,
-        windowHeight: Int = currentState.height,
-        mode: WindowMode = currentState.mode
-    ): Pair<Int, Int> {
-        val surfaceWidth = windowWidth.coerceAtLeast(1)
-        val surfaceHeight = if (mode == WindowMode.BUBBLE) {
-            windowHeight
-        } else {
-            windowHeight - appSurfaceVerticalInset
-        }.coerceAtLeast(1)
-
-        return surfaceWidth to surfaceHeight
+    fun getAppSurfaceDimensions(): Pair<Int, Int> {
+        val state = currentState
+        val minimized = state.mode == WindowMode.BUBBLE
+        val width = if (minimized) state.savedWidth else state.width
+        val height = if (minimized) state.savedHeight else state.height
+        return width.coerceAtLeast(1) to (height - appSurfaceVerticalInset).coerceAtLeast(1)
     }
 
-    private fun getDisplayDimensions(): Pair<Int, Int> = getAppSurfaceDimensions()
-
     private suspend fun resizeDisplaySurface() {
-        val (displayWidth, displayHeight) = getDisplayDimensions()
+        val (displayWidth, displayHeight) = getAppSurfaceDimensions()
         val completion = CompletableDeferred<Result<Unit>>()
         _effect.emit(FreeformEffect.ResizeDisplay(displayWidth, displayHeight, completion))
         completion.await()
@@ -272,6 +264,7 @@ class FreeformStateManager(
                     isLandscape = isLandscape
                 )
             }
+            bubbleNeedsResize = !bubbleNeedsResize
             snapBubbleToSafeZone()
             return
         }
@@ -421,6 +414,7 @@ class FreeformStateManager(
             bubbleX = (screenWidth - bubbleSizePx - safeEdge).toFloat()
         }
 
+        bubbleNeedsResize = false
         updateState {
             copy(
                 mode = WindowMode.BUBBLE,
@@ -443,13 +437,14 @@ class FreeformStateManager(
     }
 
     private suspend fun handleBubbleExpand() {
+        if (currentState.mode != WindowMode.BUBBLE) return
         cancelBubblePositionAnimation()
         freeformWindowManager.releaseBubbleSlot(windowPackageName)
 
-        val (targetWidth, targetHeight) = coerceWindowSizeForMode(
-            currentState.savedWidth,
-            currentState.savedHeight
-        )
+        val targetWidth = currentState.savedWidth
+        val targetHeight = currentState.savedHeight
+        val resizeNeeded = bubbleNeedsResize && currentState.displayId >= 0
+        bubbleNeedsResize = false
 
         val safeBottom = context.dpToPx(FreeformConstants.SAFE_ZONE_BOTTOM_DP)
         val minY = statusBarHeight.toFloat()
@@ -469,25 +464,20 @@ class FreeformStateManager(
                 height = targetHeight,
                 savedBubbleX = x,
                 savedBubbleY = y,
-                isPaused = true
+                isPaused = resizeNeeded
             )
         }
 
-        val displayId = currentState.displayId
-        if (displayId >= 0) {
+        if (resizeNeeded) {
             surfaceEventsManager.dispatch(SurfaceEvent.ShowVeilRequested(VeilReason.BUBBLE_EXPAND))
             surfaceEventsManager.dispatch(SurfaceEvent.OperationStarted("bubble_expand"))
 
-            // The display was never powered off (see handleMinimize), so there
-            // is nothing to resume — just make sure its size matches the
-            // restored window. No new display is created and the existing app
-            // task/Activity is kept, so in-memory state survives the round trip.
+            // A rotation while minimized changed the saved rectangle. Otherwise
+            // the live surface is already the right size and needs no veil.
             resizeDisplaySurface()
             delay(FreeformConstants.DELAY_SURFACE_SETTLE_MS)
             dispatch(WindowEvent.SurfaceSettled)
             surfaceEventsManager.dispatch(SurfaceEvent.OperationCompleted("bubble_expand"))
-        } else {
-            dispatch(WindowEvent.SurfaceSettled)
         }
     }
 

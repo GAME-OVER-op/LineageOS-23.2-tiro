@@ -64,7 +64,7 @@ class WindowController(
         privateFlags = WindowManager.LayoutParams.SYSTEM_FLAG_SHOW_FOR_ALL_USERS or
                 WindowManager.LayoutParams.PRIVATE_FLAG_TRUSTED_OVERLAY
         layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        title = "FreeformWindow_$packageName"
+        title = "FreeformWindow_${this@WindowController.packageName}"
         preferredRefreshRate = resolvePreferredRefreshRate()
     }
     var composeView: ComposeView? = null
@@ -75,6 +75,7 @@ class WindowController(
     private var pendingHeight = 0
     private var hasPendingLayout = false
     private var layoutUpdateScheduled = false
+    private var enterAnimation: AnimatorSet? = null
 
     private fun resolvePreferredRefreshRate(): Float {
         return try {
@@ -192,7 +193,7 @@ class WindowController(
 
     private fun scaleInInternal() {
         composeView?.let { view ->
-            view.animate().cancel()
+            enterAnimation?.cancel()
             view.scaleX = WINDOW_SCALE_FROM
             view.scaleY = WINDOW_SCALE_FROM
             view.alpha = 0f
@@ -201,7 +202,7 @@ class WindowController(
             val scaleY = ObjectAnimator.ofFloat(view, View.SCALE_Y, WINDOW_SCALE_FROM, 1f)
             val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, 0f, 1f)
 
-            AnimatorSet().apply {
+            enterAnimation = AnimatorSet().apply {
                 playTogether(scaleX, scaleY, alpha)
                 duration = SHOW_DURATION_MS
                 interpolator = SHOW_INTERPOLATOR
@@ -212,7 +213,8 @@ class WindowController(
 
     fun scaleOut(onComplete: () -> Unit) = runOnMain {
         composeView?.let { view ->
-            view.animate().cancel()
+            enterAnimation?.cancel()
+            enterAnimation = null
             val scaleX = ObjectAnimator.ofFloat(view, View.SCALE_X, view.scaleX, WINDOW_SCALE_TO)
             val scaleY = ObjectAnimator.ofFloat(view, View.SCALE_Y, view.scaleY, WINDOW_SCALE_TO)
             val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, view.alpha, 0f)
@@ -269,29 +271,31 @@ class WindowController(
             return@runOnMain
         }
 
-        val displayMetrics = context.resources.displayMetrics
-        view.animate().cancel()
+        enterAnimation?.cancel()
+        enterAnimation = null
         view.pivotX = view.width / 2f
         view.pivotY = view.height / 2f
 
-        val scaleX =
-            ObjectAnimator.ofFloat(
-                view,
-                View.SCALE_X,
-                view.scaleX,
-                displayMetrics.widthPixels.toFloat() / view.width.coerceAtLeast(1),
-            )
-        val scaleY =
-            ObjectAnimator.ofFloat(
-                view,
-                View.SCALE_Y,
-                view.scaleY,
-                displayMetrics.heightPixels.toFloat() / view.height.coerceAtLeast(1),
-            )
+        val bounds = windowManager.currentWindowMetrics.bounds
+        val fitScale = minOf(
+            bounds.width().toFloat() / view.width.coerceAtLeast(1),
+            bounds.height().toFloat() / view.height.coerceAtLeast(1),
+        ).coerceAtLeast(1f)
+        val origin = IntArray(2).also { view.getLocationOnScreen(it) }
+        val centerX = origin[0] + view.pivotX * view.scaleX
+        val centerY = origin[1] + view.pivotY * view.scaleY
+        val scaleX = ObjectAnimator.ofFloat(view, View.SCALE_X, view.scaleX, fitScale)
+        val scaleY = ObjectAnimator.ofFloat(view, View.SCALE_Y, view.scaleY, fitScale)
+        val translateX = ObjectAnimator.ofFloat(
+            view, View.TRANSLATION_X, view.translationX, view.translationX + bounds.exactCenterX() - centerX,
+        )
+        val translateY = ObjectAnimator.ofFloat(
+            view, View.TRANSLATION_Y, view.translationY, view.translationY + bounds.exactCenterY() - centerY,
+        )
         val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, view.alpha, 0f)
 
         AnimatorSet().apply {
-            playTogether(scaleX, scaleY, alpha)
+            playTogether(scaleX, scaleY, translateX, translateY, alpha)
             duration = FULLSCREEN_HANDOFF_DURATION_MS
             interpolator = FULLSCREEN_HANDOFF_INTERPOLATOR
             addListener(
@@ -307,6 +311,8 @@ class WindowController(
     }
 
     private fun removeWindowInternal() {
+        enterAnimation?.cancel()
+        enterAnimation = null
         try {
             composeView?.let { view ->
                 if (view.isAttachedToWindow) {

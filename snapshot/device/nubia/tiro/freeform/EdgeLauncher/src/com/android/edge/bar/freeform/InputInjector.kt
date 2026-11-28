@@ -16,6 +16,7 @@
 package com.android.edge.bar.freeform
 
 import android.content.Context
+import android.graphics.Matrix
 import android.hardware.input.IInputManager
 import android.hardware.input.InputManager
 import android.os.ServiceManager
@@ -51,12 +52,7 @@ class InputInjector(private val context: Context) {
     private var currentDownTime: Long = 0L
     private var scaleX: Float = 1.0f
     private var scaleY: Float = 1.0f
-    private var velocityTracker: VelocityTracker? = null
-    private var lastX: Float = 0f
-    private var lastY: Float = 0f
-    
-    private val scrollFriction = ViewConfiguration.getScrollFriction()
-    private val frictionDampingFactor = (scrollFriction * 20f).coerceIn(0.1f, 0.5f)
+    private val touchTransform = Matrix()
 
     companion object {
         private const val TAG = "InputInjector"
@@ -65,7 +61,6 @@ class InputInjector(private val context: Context) {
         private const val INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH = 2
         
         private const val DEFAULT_SWIPE_DURATION = 300
-        private const val FRICTION_VELOCITY_THRESHOLD = 500f
 
         private val TRANSITION_ACTIONS = setOf(
             MotionEvent.ACTION_DOWN,
@@ -79,6 +74,7 @@ class InputInjector(private val context: Context) {
     fun setScale(viewWidth: Int, viewHeight: Int, displayWidth: Int, displayHeight: Int) {
         this.scaleX = displayWidth.toFloat() / viewWidth.coerceAtLeast(1)
         this.scaleY = displayHeight.toFloat() / viewHeight.coerceAtLeast(1)
+        touchTransform.setScale(scaleX, scaleY)
     }
 
     fun injectTouchEvent(event: MotionEvent): Boolean {
@@ -87,128 +83,16 @@ class InputInjector(private val context: Context) {
             return false
         }
         
-        val action = event.actionMasked
-        
-        when (action) {
-            MotionEvent.ACTION_DOWN -> {
-                currentDownTime = event.downTime
-                lastX = event.x
-                lastY = event.y
-                velocityTracker?.recycle()
-                velocityTracker = VelocityTracker.obtain()
-                velocityTracker?.addMovement(event)
-            }
-            MotionEvent.ACTION_MOVE -> {
-                velocityTracker?.addMovement(event)
-                lastX = event.x
-                lastY = event.y
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                velocityTracker?.addMovement(event)
-                velocityTracker?.computeCurrentVelocity(1000)
-                
-                val velocityX = velocityTracker?.xVelocity ?: 0f
-                val velocityY = velocityTracker?.yVelocity ?: 0f
-                val totalVelocity = kotlin.math.sqrt(velocityX * velocityX + velocityY * velocityY)
-                
-                velocityTracker?.recycle()
-                velocityTracker = null
-            }
+        // Preserve the chronological history (including resampled points) and pointer data.
+        // InputDispatcher uses the event transform when reinjecting local coordinates.
+        val forwarded = MotionEvent.obtain(event)
+        return try {
+            forwarded.transform(touchTransform)
+            forwarded.setDisplayId(displayId)
+            injectInputEvent(forwarded)
+        } finally {
+            forwarded.recycle()
         }
-        
-        return injectScaledEvent(event)
-    }
-    
-    private fun actionToString(action: Int): String {
-        return when (action and MotionEvent.ACTION_MASK) {
-            MotionEvent.ACTION_DOWN -> "DOWN"
-            MotionEvent.ACTION_UP -> "UP"
-            MotionEvent.ACTION_MOVE -> "MOVE"
-            MotionEvent.ACTION_CANCEL -> "CANCEL"
-            MotionEvent.ACTION_POINTER_DOWN -> "POINTER_DOWN"
-            MotionEvent.ACTION_POINTER_UP -> "POINTER_UP"
-            else -> "UNKNOWN($action)"
-        }
-    }
-
-    private fun injectScaledEvent(event: MotionEvent): Boolean {
-        val actionStr = actionToString(event.action)
-        val historySize = event.historySize
-
-        val pointerCoords = arrayOfNulls<MotionEvent.PointerCoords>(event.pointerCount)
-        val pointerProperties = arrayOfNulls<MotionEvent.PointerProperties>(event.pointerCount)
-        
-        velocityTracker?.computeCurrentVelocity(1000)
-        val currentVelocity = velocityTracker?.let {
-            kotlin.math.sqrt(it.xVelocity * it.xVelocity + it.yVelocity * it.yVelocity)
-        } ?: 0f
-        
-        val dampingMultiplier = if (currentVelocity > FRICTION_VELOCITY_THRESHOLD) {
-            1.0f - (frictionDampingFactor * (currentVelocity - FRICTION_VELOCITY_THRESHOLD) / currentVelocity).coerceIn(0f, 0.5f)
-        } else {
-            1.0f
-        }
-        
-        for (i in 0 until event.pointerCount) {
-            val oldCoords = MotionEvent.PointerCoords()
-            val pointerProperty = MotionEvent.PointerProperties()
-            event.getPointerCoords(i, oldCoords)
-            event.getPointerProperties(i, pointerProperty)
-            
-            pointerCoords[i] = MotionEvent.PointerCoords().apply {
-                copyFrom(oldCoords)
-                if (event.actionMasked == MotionEvent.ACTION_MOVE && dampingMultiplier < 1.0f) {
-                    val deltaX = (oldCoords.x - lastX) * dampingMultiplier
-                    val deltaY = (oldCoords.y - lastY) * dampingMultiplier
-                    x = (lastX + deltaX) * scaleX
-                    y = (lastY + deltaY) * scaleY
-                } else {
-                    x = oldCoords.x * scaleX
-                    y = oldCoords.y * scaleY
-                }
-            }
-            pointerProperties[i] = pointerProperty
-        }
-        
-        val scaledX = pointerCoords[0]?.x ?: 0f
-        val scaledY = pointerCoords[0]?.y ?: 0f
-        
-        val newEvent = MotionEvent.obtain(
-            if (currentDownTime > 0) currentDownTime else event.downTime,
-            event.eventTime,
-            event.action,
-            event.pointerCount,
-            pointerProperties,
-            pointerCoords,
-            event.metaState,
-            event.buttonState,
-            event.xPrecision,
-            event.yPrecision,
-            event.deviceId,
-            event.edgeFlags,
-            event.source,
-            event.flags
-        )
-
-        for (h in 0 until historySize) {
-            val historyTime = event.getHistoricalEventTime(h)
-            val allHistCoords = Array(event.pointerCount) { p ->
-                MotionEvent.PointerCoords().apply {
-                    event.getHistoricalPointerCoords(p, h, this)
-                    x *= scaleX
-                    y *= scaleY
-                }
-            }
-            newEvent.addBatch(historyTime, allHistCoords, event.metaState)
-        }
-        
-        newEvent.setDisplayId(displayId)
-        
-        val result = injectInputEvent(newEvent)
-        
-        newEvent.recycle()
-        
-        return result
     }
 
     fun injectMotionEvent(action: Int, x: Float, y: Float) {

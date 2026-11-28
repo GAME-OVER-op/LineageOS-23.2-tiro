@@ -63,15 +63,15 @@ class FreeformWindowManager private constructor(private val context: Context) {
         listeners.forEach { it.onWindowAdded(packageName, window) }
     }
 
-    fun unregisterWindow(packageName: String) {
-        windows.remove(packageName)?.let {
-            if (focusedWindow == it) {
-                focusedWindow = null
-            }
-            releaseBubbleSlot(packageName)
-            Log.d(TAG, "Unregistered window for $packageName. Remaining windows: ${windows.size}")
-            listeners.forEach { listener -> listener.onWindowRemoved(packageName) }
+    fun unregisterWindow(packageName: String, window: FreeformWindowCompose) {
+        // An old closing animation may finish after a replacement was registered.
+        if (!windows.remove(packageName, window)) return
+        if (focusedWindow == window) {
+            focusedWindow = null
         }
+        releaseBubbleSlot(packageName)
+        Log.d(TAG, "Unregistered window for $packageName. Remaining windows: ${windows.size}")
+        listeners.forEach { listener -> listener.onWindowRemoved(packageName) }
     }
 
     fun getWindow(packageName: String): FreeformWindowCompose? {
@@ -132,7 +132,7 @@ class FreeformWindowManager private constructor(private val context: Context) {
     fun closeWindow(packageName: String) {
         windows[packageName]?.let { window ->
             window.destroy("Closed by window manager")
-            unregisterWindow(packageName)
+            unregisterWindow(packageName, window)
         }
     }
 

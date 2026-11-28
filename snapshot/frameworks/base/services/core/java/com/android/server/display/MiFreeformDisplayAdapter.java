@@ -65,8 +65,11 @@ public class MiFreeformDisplayAdapter extends DisplayAdapter {
         }
         
         final String uniqueId = UNIQUE_ID_PREFIX + name;
+        // Keep the requested app-facing mode below, but compose on the current pacesetter.
+        // A nonzero SurfaceFlinger request is adjusted once at creation: opening at 60 Hz
+        // could leave this display composing at 60 even after the physical screen went to 120.
         IBinder displayToken = DisplayControl.createVirtualDisplay(
-                name, true, false, uniqueId, refreshRate);
+                name, true, false, uniqueId, 0f);
         FreeformDisplayDevice device = new FreeformDisplayDevice(displayToken, uniqueId, width, height,
                 densityDpi, refreshRate, presentationDeadlineNanos,
                 new FreeformFlags(true, true /* ownContentOnly */, false /* shouldShowSystemDecorations */),

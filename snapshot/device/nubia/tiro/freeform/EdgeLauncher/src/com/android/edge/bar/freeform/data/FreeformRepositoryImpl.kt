@@ -33,6 +33,8 @@ import android.view.KeyEvent
 import android.view.Surface
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class FreeformRepositoryImpl(
     private val context: Context
@@ -55,6 +57,7 @@ class FreeformRepositoryImpl(
     private var service: IFreeformOverlayManager? = null
     
     private var currentAppToken: IBinder? = null
+    private val displayLifecycle = Mutex()
     
     fun getAppToken(): IBinder? = currentAppToken
     
@@ -74,14 +77,11 @@ class FreeformRepositoryImpl(
         height: Int,
         densityDpi: Int,
         callback: FreeformRepository.FreeformCallback
-    ): Int = withContext(Dispatchers.IO) {
+    ): Int = displayLifecycle.withLock {
         try {
-            var dpId = Display.DEFAULT_DISPLAY
             val wrappedCallback = object : IFreeformDisplayCallback.Stub() {
                 override fun onDisplayAdd(displayId: Int) {
-                    currentAppToken = this.asBinder()
                     callback.onDisplayAdded(displayId)
-                    dpId = displayId
                 }
                 override fun onDisplayPaused() {
                     callback.onDisplayPaused()
@@ -94,22 +94,30 @@ class FreeformRepositoryImpl(
                 }
             }
             
-            service?.createFreeform(
-                "freeform_${width}x${height}",
-                wrappedCallback,
-                width,
-                height,
-                densityDpi,
-                false,
-                false,
-                false,
-                surface,
-                getRefreshRate(dpId),
-                0L
-            )
+            val manager = service ?: return@withLock -1
+            // Publish the token on the caller's thread before the Binder call.
+            // Closing before onDisplayAdd must still release this display.
+            currentAppToken = wrappedCallback.asBinder()
+            withContext(Dispatchers.IO) {
+                manager.createFreeform(
+                    "freeform_${width}x${height}",
+                    wrappedCallback,
+                    width,
+                    height,
+                    densityDpi,
+                    false,
+                    false,
+                    false,
+                    surface,
+                    getRefreshRate(Display.DEFAULT_DISPLAY),
+                    0L
+                )
+            }
             
             Log.d(TAG, "Freeform display creation initiated...")
             0
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create display", e)
             -1
@@ -239,9 +247,9 @@ class FreeformRepositoryImpl(
         }
     }
     
-    override suspend fun releaseDisplay(appToken: android.os.IBinder): Result<Unit> = withContext(Dispatchers.IO) {
+    override suspend fun releaseDisplay(appToken: android.os.IBinder): Result<Unit> = displayLifecycle.withLock {
         try {
-            service?.releaseFreeform(appToken)
+            withContext(Dispatchers.IO) { service?.releaseFreeform(appToken) }
             Log.d(TAG, "Display released successfully")
             Result.success(Unit)
         } catch (e: Exception) {

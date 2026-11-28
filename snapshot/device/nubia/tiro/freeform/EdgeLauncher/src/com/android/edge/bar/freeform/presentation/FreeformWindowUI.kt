@@ -15,11 +15,13 @@
  */
 package com.android.edge.bar.freeform.presentation
 
+import android.graphics.PixelFormat
 import android.os.SystemClock
 import android.util.Log
-import android.view.TextureView
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -35,8 +37,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -74,8 +76,8 @@ fun FreeformWindowContent(
     onBringToFront: () -> Unit,
     onMaximizeFullscreen: () -> Unit,
     onUpdateWindowLayout: (Float, Float, Int, Int) -> Unit,
-    onSetupTextureView: (TextureView) -> Unit,
-    textureViewListener: TextureView.SurfaceTextureListener,
+    onSetupSurfaceView: (SurfaceView) -> Unit,
+    surfaceCallback: SurfaceHolder.Callback,
     inputInjector: InputInjector
 ) {
     val state by stateFlow.collectAsState()
@@ -86,21 +88,9 @@ fun FreeformWindowContent(
     
     val isBubbleMode = state.mode == WindowMode.BUBBLE
 
-    fun onSetDragging(dragging: Boolean) {
-    }
-
-    // Keep the window mounted while it is minimized to a bubble. In
-    // particular the TextureView that hosts the virtual display must NOT be
-    // removed from composition: doing so destroys its surface, forces the
-    // creation of a new freeform display on expand and moves the app task to
-    // it, which recreates the Activity and loses in-memory state (playback).
-    // Fade it out visually instead — the display and the task stay alive.
-    val contentAlpha by animateFloatAsState(
-        targetValue = if (isBubbleMode) 0f else 1f,
-        animationSpec = tween(if (isBubbleMode) 220 else 300),
-        label = "freeform-content-alpha"
-    )
-    Box(modifier = Modifier.fillMaxSize().alpha(contentAlpha)) {
+    // Keep the SurfaceView attached while minimized, but don't draw the old
+    // window in the small bubble bounds or leave invisible controls touchable.
+    Box(modifier = Modifier.fillMaxSize()) {
         FullWindowView(
             state = state,
             stateManager = stateManager,
@@ -109,9 +99,8 @@ fun FreeformWindowContent(
             onBack = onBack,
             onMaximizeFullscreen = onMaximizeFullscreen,
             onBringToFront = onBringToFront,
-            onSetDragging = ::onSetDragging,
-            onSetupTextureView = onSetupTextureView,
-            textureViewListener = textureViewListener,
+            onSetupSurfaceView = onSetupSurfaceView,
+            surfaceCallback = surfaceCallback,
             inputInjector = inputInjector
         )
     }
@@ -197,13 +186,13 @@ private fun FullWindowView(
     onBack: () -> Unit,
     onMaximizeFullscreen: () -> Unit,
     onBringToFront: () -> Unit,
-    onSetDragging: (Boolean) -> Unit,
-    onSetupTextureView: (TextureView) -> Unit,
-    textureViewListener: TextureView.SurfaceTextureListener,
+    onSetupSurfaceView: (SurfaceView) -> Unit,
+    surfaceCallback: SurfaceHolder.Callback,
     inputInjector: InputInjector
 ) {
     val density = LocalDensity.current
     val isDesktopMode = state.mode == WindowMode.DESKTOP
+    val isBubbleMode = state.mode == WindowMode.BUBBLE
     val decorCornerRadius = DESKTOP_CORNER_RADIUS_DP.dp
     val decorMetrics = FreeformDecorMetricsProvider.provide(state.width, density)
 
@@ -231,6 +220,14 @@ private fun FullWindowView(
 
     var isWindowMenuExpanded by remember { mutableStateOf(false) }
     var dropdownOffsetX by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(isBubbleMode) {
+        if (isBubbleMode) {
+            isWindowMenuExpanded = false
+            isDragging = false
+            hideHandlesJob?.cancel()
+            isResizing = false
+        }
+    }
     val onMinimizeAction: (() -> Unit)? = if (isDesktopMode) null else ({ stateManager.onMinimize() })
     val dropdownStart = with(density) {
         val requestedStart = dropdownOffsetX.toDp()
@@ -243,7 +240,7 @@ private fun FullWindowView(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            DesktopTitleBar(
+            if (!isBubbleMode) DesktopTitleBar(
                 onClose = onClose,
                 onBack = null,
                 onMinimize = onMinimizeAction,
@@ -253,11 +250,11 @@ private fun FullWindowView(
                 },
                 onDragStart = {
                     onBringToFront()
-                    onSetDragging(true)
+                    isDragging = true
                 },
                 onDragEnd = {
                     stateManager.onDragEnd()
-                    onSetDragging(false)
+                    isDragging = false
                 },
                 isMenuExpanded = isWindowMenuExpanded,
                 onMenuExpandedChange = { isWindowMenuExpanded = it },
@@ -272,14 +269,12 @@ private fun FullWindowView(
                 WindowSurface(
                     state = state,
                     decorMetrics = decorMetrics,
-                    onSetupTextureView = { view ->
-                        onSetupTextureView(view)
-                    },
-                    textureViewListener = textureViewListener,
+                    onSetupSurfaceView = onSetupSurfaceView,
+                    surfaceCallback = surfaceCallback,
                     inputInjector = inputInjector
                 )
 
-                ResizeHandles(
+                if (!isBubbleMode) ResizeHandles(
                     stateManager = stateManager,
                     density = density,
                     decorMetrics = decorMetrics,
@@ -292,7 +287,7 @@ private fun FullWindowView(
             }
         }
 
-        AnimatedVisibility(
+        if (!isBubbleMode) AnimatedVisibility(
             visible = showResizeBorder,
             enter = fadeIn(animationSpec = tween(150)),
             exit = fadeOut(animationSpec = tween(300))
@@ -312,7 +307,7 @@ private fun FullWindowView(
             )
         }
 
-        AnimatedVisibility(
+        if (!isBubbleMode) AnimatedVisibility(
             visible = isWindowMenuExpanded,
             enter = fadeIn(animationSpec = tween(150)) + expandVertically(
                 animationSpec = tween(200),
@@ -357,10 +352,11 @@ private fun FullWindowView(
 private fun BoxScope.WindowSurface(
     state: WindowState,
     decorMetrics: FreeformDecorMetrics,
-    onSetupTextureView: (TextureView) -> Unit,
-    textureViewListener: TextureView.SurfaceTextureListener,
+    onSetupSurfaceView: (SurfaceView) -> Unit,
+    surfaceCallback: SurfaceHolder.Callback,
     inputInjector: InputInjector
 ) {
+    val isBubbleMode = state.mode == WindowMode.BUBBLE
     Surface(
         modifier = Modifier
             .fillMaxSize()
@@ -369,13 +365,12 @@ private fun BoxScope.WindowSurface(
                 end = decorMetrics.sidePadding,
                 bottom = decorMetrics.bottomPadding
             ),
-        color = MaterialTheme.colorScheme.surface
+        color = if (isBubbleMode) Color.Transparent else MaterialTheme.colorScheme.surface
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
+                modifier = Modifier.fillMaxSize().then(
+                    if (isBubbleMode) Modifier else Modifier.pointerInput(Unit) {
                         awaitPointerEventScope {
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -396,20 +391,25 @@ private fun BoxScope.WindowSurface(
                             }
                         }
                     }
+                )
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        TextureView(ctx).also {
-                            it.isOpaque = false
-                            it.surfaceTextureListener = textureViewListener
-                            onSetupTextureView(it)
+                        SurfaceView(ctx, null, 0, 0, true).also {
+                            // A separate compositor layer: app frames no longer need
+                            // to redraw the Compose window through a TextureView.
+                            it.setSurfaceLifecycle(SurfaceView.SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT)
+                            it.holder.setFormat(PixelFormat.RGBX_8888)
+                            onSetupSurfaceView(it)
+                            it.holder.addCallback(surfaceCallback)
                         }
                     },
+                    update = { it.visibility = if (isBubbleMode) View.INVISIBLE else View.VISIBLE },
                     modifier = Modifier.fillMaxSize()
                 )
 
                 val showVeil = state.isPaused || !state.isSurfaceReady || state.isAppLaunching
-                AnimatedVisibility(
+                if (!isBubbleMode) AnimatedVisibility(
                     visible = showVeil,
                     enter = fadeIn(),
                     exit = fadeOut()

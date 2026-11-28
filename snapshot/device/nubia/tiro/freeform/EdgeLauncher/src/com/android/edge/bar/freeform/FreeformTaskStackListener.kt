@@ -20,7 +20,10 @@ import android.app.ActivityTaskManager
 import android.app.TaskStackListener
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.Display
 
 class FreeformTaskStackListener(
     private val context: Context,
@@ -36,6 +39,7 @@ class FreeformTaskStackListener(
     }
 
     private var isRegistered = false
+    private val handler = Handler(Looper.getMainLooper())
 
     fun register() {
         if (!isRegistered) {
@@ -58,11 +62,16 @@ class FreeformTaskStackListener(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to unregister task stack listener", e)
             }
+            handler.removeCallbacksAndMessages(null)
         }
     }
 
     override fun onTaskRemoved(taskId: Int) {
         super.onTaskRemoved(taskId)
+        handler.post { if (isRegistered) handleTaskRemoved(taskId) }
+    }
+
+    private fun handleTaskRemoved(taskId: Int) {
         Log.d(TAG, "Task removed: $taskId")
         try {
             val tasks = activityTaskManager.getTasks(100)
@@ -94,11 +103,15 @@ class FreeformTaskStackListener(
     override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo?) {
         super.onTaskMovedToFront(taskInfo)
         val task = taskInfo ?: return
+        handler.post { if (isRegistered) handleTaskMovedToFront(task) }
+    }
+
+    private fun handleTaskMovedToFront(task: ActivityManager.RunningTaskInfo) {
         val packageName = task.topActivity?.packageName ?: task.baseActivity?.packageName ?: return
         val window = windowManager.getWindow(packageName) ?: return
         val freeformDisplayId = window.stateManager.state.value.displayId
 
-        if (freeformDisplayId >= 0 && task.displayId != freeformDisplayId) {
+        if (freeformDisplayId > Display.DEFAULT_DISPLAY && task.displayId == Display.DEFAULT_DISPLAY) {
             // The app was launched from the normal launcher (or otherwise moved to
             // the default display). Hand the overlay over with the same grow-and-fade
             // animation used by the in-overlay "open fullscreen" action instead of
@@ -107,8 +120,7 @@ class FreeformTaskStackListener(
                 TAG,
                 "Handing freeform window to fullscreen for $packageName: task moved to display ${task.displayId}, freeform display is $freeformDisplayId"
             )
-            windowManager.getWindow(packageName)?.onLaunchedFromLauncher()
-                ?: windowManager.closeWindow(packageName)
+            window.onLaunchedFromLauncher()
             return
         }
 
@@ -132,7 +144,9 @@ class FreeformTaskStackListener(
             }
             Log.d(TAG, "Task $taskId orientation changed: $requestedOrientation (landscape=$isLandscape) on display $displayId")
             
-            windowManager.notifyOrientationChanged(displayId, isLandscape)
+            handler.post {
+                if (isRegistered) windowManager.notifyOrientationChanged(displayId, isLandscape)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling orientation change", e)
         }

@@ -20,8 +20,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.graphics.SurfaceTexture
-import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -65,8 +63,7 @@ class FreeformWindowViewModel(
     val screenHeight: Int = displayMetrics.heightPixels
     val density: Float = displayMetrics.density
 
-    private var displaySurface: Surface? = null
-    private var textureViewRef: TextureView? = null
+    private var surfaceView: SurfaceView? = null
     private var appliedDisplayWidth = 0
     private var appliedDisplayHeight = 0
     private var appliedDisplayDensityDpi = 0
@@ -104,6 +101,7 @@ class FreeformWindowViewModel(
     }
     
     init {
+        restoreInitialWindowState()
         scope.launch {
             stateManager.effect.collect { effect ->
                 when (effect) {
@@ -125,13 +123,12 @@ class FreeformWindowViewModel(
     
     val windowState: StateFlow<WindowState> get() = stateManager.state
 
-    fun setupTextureViewTouch(view: View) {
-        textureViewRef = view as? TextureView
-        // The virtual display producer asks for 120 Hz, but the TextureView that
-        // presents those buffers into the host window keeps its own requested
-        // frame rate. Without this the overlay compositor presents at ~60-80 Hz
-        // while the app renders at 120 Hz (visible judder when scrolling).
-        textureViewRef?.setRequestedFrameRate(resolveTargetRefreshRate())
+    fun setupSurfaceView(view: SurfaceView) {
+        surfaceView = view
+        val (width, height) = stateManager.getAppSurfaceDimensions()
+        // The host may transiently lay this view out at bubble size (or stretch it
+        // during a drag). Only resize the output buffer when the app display resizes.
+        view.holder.setFixedSize(width, height)
         view.isClickable = true
         view.isFocusable = true
         view.isFocusableInTouchMode = true
@@ -144,12 +141,7 @@ class FreeformWindowViewModel(
                 // a stale id silently drops every touch after a resize/recreate.
                 inputInjector.setDisplayId(displayId)
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    val (displayWidth, displayHeight) = stateManager.getAppSurfaceDimensions(
-                        windowWidth = currentState.width,
-                        windowHeight = currentState.height,
-                        mode = currentState.mode
-                    )
-                    inputInjector.setScale(v.width, v.height, displayWidth, displayHeight)
+                    inputInjector.setScale(v.width, v.height, appliedDisplayWidth, appliedDisplayHeight)
                 }
 
                 val result = inputInjector.injectTouchEvent(event)
@@ -181,11 +173,6 @@ class FreeformWindowViewModel(
 
         val targetDensity = config.densityForWidth(width)
 
-        textureViewRef?.let { view ->
-            view.surfaceTexture?.setDefaultBufferSize(width, height)
-            inputInjector.setScale(view.width, view.height, width, height)
-        }
-
         // The cached "applied" values only describe what WE last sent to the display.
         // After a task is moved onto a freshly created display (returning from
         // fullscreen) or a form change is reverted, the Activity can still be
@@ -197,36 +184,24 @@ class FreeformWindowViewModel(
                 appliedDisplayWidth == width &&
                 appliedDisplayHeight == height &&
                 appliedDisplayDensityDpi == targetDensity) {
-            val latestState = stateManager.state.value
-            saveWindowState(latestState.width, latestState.height, latestState.isLandscape)
+            saveCurrentWindowState()
             return Result.success(Unit)
         }
 
+        surfaceView?.holder?.setFixedSize(width, height)
         return repository.resizeDisplay(token, width, height, targetDensity)
             .onSuccess {
-                val latestState = stateManager.state.value
                 appliedDisplayWidth = width
                 appliedDisplayHeight = height
                 appliedDisplayDensityDpi = targetDensity
+                surfaceView?.let { inputInjector.setScale(it.width, it.height, width, height) }
                 Log.d(TAG, "Virtual display resized to ${width}x${height} at ${targetDensity}dpi")
-                saveWindowState(latestState.width, latestState.height, latestState.isLandscape)
+                saveCurrentWindowState()
             }
-            .onFailure { Log.e(TAG, "Failed to resize virtual display", it) }
-    }
-
-    private fun resolveTargetRefreshRate(): Float {
-        return try {
-            val dm = context.getSystemService(DisplayManager::class.java)
-            val display = dm?.getDisplay(Display.DEFAULT_DISPLAY)
-
-            listOfNotNull(
-                display?.refreshRate,
-                display?.supportedModes?.maxByOrNull { it.refreshRate }?.refreshRate,
-            ).maxOrNull() ?: 60f
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve target refresh rate", e)
-            60f
-        }
+            .onFailure {
+                surfaceView?.holder?.setFixedSize(appliedDisplayWidth, appliedDisplayHeight)
+                Log.e(TAG, "Failed to resize virtual display", it)
+            }
     }
 
     private fun resolveInitialOrientation(packageName: String, activityName: String): Int {
@@ -282,6 +257,15 @@ class FreeformWindowViewModel(
             apply()
         }
     }
+
+    private fun saveCurrentWindowState() {
+        val state = stateManager.state.value
+        if (state.mode == WindowMode.BUBBLE) {
+            saveWindowState(state.savedWidth, state.savedHeight, state.isLandscape)
+        } else {
+            saveWindowState(state.width, state.height, state.isLandscape)
+        }
+    }
     
     private fun clearWindowState() {
          getPrefs().edit().apply {
@@ -304,15 +288,10 @@ class FreeformWindowViewModel(
         return PersistedState(width, height, isLandscape)
     }
 
-    fun onSurfaceTextureAvailable(
-        surface: SurfaceTexture,
-        width: Int,
-        height: Int,
-        onDisplayReady: (Int) -> Unit
-    ) {
-        var orientation = resolveInitialOrientation(packageName, activityName)
+    private fun restoreInitialWindowState() {
+        val orientation = resolveInitialOrientation(packageName, activityName)
         var isLandscape = isLandscapeOrientation(orientation)
-        var isPortrait = isPortraitOrientation(orientation)
+        val isPortrait = isPortraitOrientation(orientation)
         
         var windowWidth = config.width
         var windowHeight = config.height
@@ -340,50 +319,22 @@ class FreeformWindowViewModel(
         
         stateManager.restoreWindowSize(windowWidth, windowHeight, isLandscape)
         val restoredState = stateManager.state.value
-        windowWidth = restoredState.width
-        windowHeight = restoredState.height
+        saveWindowState(restoredState.width, restoredState.height, isLandscape)
+    }
 
-        saveWindowState(windowWidth, windowHeight, isLandscape)
-        
-        if (isLandscape) {
-            stateManager.onOrientationChanged(true)
-        } else {
-             stateManager.onOrientationChanged(false)
-        }
-        
-        val (displayWidth, displayHeight) = stateManager.getAppSurfaceDimensions(
-            windowWidth = windowWidth,
-            windowHeight = windowHeight,
-            mode = restoredState.mode
-        )
+    fun onSurfaceAvailable(surface: Surface, onDisplayReady: (Int) -> Unit) {
+        val (displayWidth, displayHeight) = stateManager.getAppSurfaceDimensions()
+        val displayDensity = config.densityForWidth(displayWidth)
 
         Log.i(
             TAG,
-            "onSurfaceTextureAvailable: window=${windowWidth}x${windowHeight}, " +
-                "display=${displayWidth}x${displayHeight}, isLandscape=$isLandscape"
+            "Surface ready for virtual display ${displayWidth}x${displayHeight} at ${displayDensity}dpi"
         )
 
-        surface.setDefaultBufferSize(displayWidth, displayHeight)
         appliedDisplayWidth = displayWidth
         appliedDisplayHeight = displayHeight
-        appliedDisplayDensityDpi = config.densityDpi
-        inputInjector.setScale(width, height, displayWidth, displayHeight)
-
-        val displaySurface = Surface(surface)
-
-        val targetRefreshRate = resolveTargetRefreshRate()
-        try {
-            displaySurface.setFrameRate(
-                targetRefreshRate,
-                Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
-            )
-            Log.i(TAG, "Requested freeform surface refresh rate: ${targetRefreshRate}Hz")
-            textureViewRef?.setRequestedFrameRate(targetRefreshRate)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to request freeform surface refresh rate", e)
-        }
-
-        this.displaySurface = displaySurface
+        appliedDisplayDensityDpi = displayDensity
+        surfaceView?.let { inputInjector.setScale(it.width, it.height, displayWidth, displayHeight) }
 
         scope.launch {
             var attachFinished = false
@@ -439,11 +390,11 @@ class FreeformWindowViewModel(
 
             val callback = object : FreeformRepository.FreeformCallback {
                 override fun onDisplayAdded(displayId: Int) {
-                    Log.i(TAG, "onDisplayAdded: displayId=$displayId, taskId=$taskId, isLandscape=$isLandscape")
-                    stateManager.setDisplayId(displayId)
-                    inputInjector.setDisplayId(displayId)
-
                     scope.launch {
+                        if (attachFinished || displayReleaseStarted) return@launch
+                        Log.i(TAG, "onDisplayAdded: displayId=$displayId, taskId=$taskId")
+                        stateManager.setDisplayId(displayId)
+                        inputInjector.setDisplayId(displayId)
                         if (taskId != -1) {
                             repository.moveRootTaskToDisplay(taskId, displayId)
                                 .onSuccess {
@@ -455,7 +406,6 @@ class FreeformWindowViewModel(
                                         // match the freshly created display, so a normal resize
                                         // would be skipped and the app would keep the wrong UI
                                         // scale. Force the density onto the moved task.
-                                        val latest = stateManager.state.value
                                         // resizeVirtualDisplay expects the app-surface size,
                                         // not the outer window size: the window also contains
                                         // the title bar and the bottom resize handle, which
@@ -463,12 +413,7 @@ class FreeformWindowViewModel(
                                         // size here makes the virtual display taller than its
                                         // surface, so apps render vertically squeezed (circles
                                         // look like horizontal ovals) until the next resize.
-                                        val (displayWidth, displayHeight) =
-                                            stateManager.getAppSurfaceDimensions(
-                                                windowWidth = latest.width,
-                                                windowHeight = latest.height,
-                                                mode = latest.mode,
-                                            )
+                                        val (displayWidth, displayHeight) = stateManager.getAppSurfaceDimensions()
                                         resizeVirtualDisplay(
                                             displayWidth,
                                             displayHeight,
@@ -500,13 +445,17 @@ class FreeformWindowViewModel(
                 }
 
                 override fun onDisplayStopped() {
-                    Log.d(TAG, "Display stopped - cleaning up window")
-                    stateManager.dispatch(WindowEvent.DisplayStopped)
-                    handler.post { onWindowDead?.invoke() }
+                    handler.post {
+                        if (!displayReleaseStarted) {
+                            Log.d(TAG, "Display stopped - cleaning up window")
+                            stateManager.dispatch(WindowEvent.DisplayStopped)
+                            onWindowDead?.invoke()
+                        }
+                    }
                 }
             }
 
-            val result = repository.createDisplay(displaySurface, displayWidth, displayHeight, config.densityDpi, callback)
+            val result = repository.createDisplay(surface, displayWidth, displayHeight, displayDensity, callback)
             if (result < 0) {
                 failAttach("Failed to create display")
             } else {
@@ -539,14 +488,10 @@ class FreeformWindowViewModel(
         stateManager.destroy()
         releaseVirtualDisplay()
 
-        displaySurface?.let {
-            it.release()
-            displaySurface = null
-        }
+        surfaceView = null  // SurfaceHolder owns and releases its surface.
 
         scope.cancel()
         freeformWindowManager.removeListener(windowEventListener)
-        freeformWindowManager.unregisterWindow(packageName)
     }
 
     /**
